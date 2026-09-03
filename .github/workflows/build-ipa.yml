@@ -1,4 +1,4 @@
-name: Build XRD Dylib
+name: Build XRD IPA
 
 on:
   push:
@@ -21,11 +21,11 @@ jobs:
       - name: Generate Xcode Project
         run: xcodegen generate
 
-      - name: Build Framework
+      - name: Build
         run: |
           xcodebuild build \
-            -project XRDMod.xcodeproj \
-            -scheme XRDMod \
+            -project XRD-Agar.xcodeproj \
+            -scheme XRD-Agar \
             -configuration Release \
             -sdk iphoneos \
             -derivedDataPath build/DerivedData \
@@ -34,32 +34,17 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGN_ENTITLEMENTS=""
 
-      - name: Package Dylib
+      - name: Create IPA
         run: |
-          FRAMEWORK_PATH="build/DerivedData/Build/Products/Release-iphoneos/XRDMod.framework"
-          echo "Framework contents:"
-          ls -la "$FRAMEWORK_PATH/"
+          mkdir -p build/Payload
+          cp -r build/DerivedData/Build/Products/Release-iphoneos/XRD-Agar.app build/Payload/
+          cd build
+          zip -r XRD-Agar.ipa Payload
+          ls -la XRD-Agar.ipa
 
-          # Copy raw dylib
-          cp "$FRAMEWORK_PATH/XRDMod" XRDMod.dylib
-
-          # Zip the framework
-          cd build/DerivedData/Build/Products/Release-iphoneos/
-          zip -r "$GITHUB_WORKSPACE/XRDMod-framework.zip" XRDMod.framework
-          cd "$GITHUB_WORKSPACE"
-
-          ls -la XRDMod.dylib XRDMod-framework.zip
-
-      - name: Upload Dylib
+      - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: XRDMod-Dylib
-          path: XRDMod.dylib
-          retention-days: 30
-
-      - name: Upload Framework
-        uses: actions/upload-artifact@v4
-        with:
-          name: XRDMod-Framework
-          path: XRDMod-framework.zip
+          name: XRD-Agar-IPA
+          path: build/XRD-Agar.ipa
           retention-days: 30
