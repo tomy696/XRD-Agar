@@ -13,21 +13,32 @@ class ServerResolver {
         partyCode: String = "",
         completion: @escaping (Result<ServerInfo, Error>) -> Void
     ) {
-        if gameMode == .party && !partyCode.isEmpty {
-            resolvePartyServer(partyCode: partyCode, region: region, completion: completion)
+        guard let endpointStr = NetworkInterceptor.shared.discoveredAPIEndpoint,
+              let endpoint = URL(string: endpointStr) else {
+            completion(.failure(ServerError.noAPIDiscovered))
             return
         }
 
-        let endpoint = URL(string: "https://mc-api.agar.io/api/v1/server")!
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("https://agar.io", forHTTPHeaderField: "Origin")
 
-        let body: [String: Any] = [
+        if let headers = NetworkInterceptor.shared.discoveredHeaders {
+            for (key, value) in headers {
+                if key.lowercased() != "content-length" {
+                    request.setValue(value, forHTTPHeaderField: key)
+                }
+            }
+        }
+
+        var body: [String: Any] = [
             "region": region.apiValue,
-            "mode": gameMode.serverMode
+            "mode": (gameMode == .party && !partyCode.isEmpty) ? ":party" : gameMode.serverMode
         ]
+        if gameMode == .party && !partyCode.isEmpty {
+            body["token"] = partyCode
+        }
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
         URLSession.shared.dataTask(with: request) { data, response, error in
@@ -36,52 +47,29 @@ class ServerResolver {
                 return
             }
             guard let data = data,
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let endpoints = json["endpoints"] as? [[String: Any]],
-                  let first = endpoints.first,
-                  let serverURL = first["url"] as? String else {
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                completion(.failure(ServerError.invalidResponse))
+                return
+            }
+
+            var serverURL: String?
+            if let endpoints = json["endpoints"] as? [[String: Any]],
+               let first = endpoints.first,
+               let url = first["url"] as? String {
+                serverURL = url
+            } else if let url = json["url"] as? String {
+                serverURL = url
+            } else if let url = json["server"] as? String {
+                serverURL = url
+            }
+
+            guard let server = serverURL else {
                 completion(.failure(ServerError.noServerFound))
                 return
             }
+
             let token = (json["token"] as? String) ?? ""
-            let wsURL = serverURL.hasPrefix("wss://") ? serverURL : "wss://\(serverURL)"
-            completion(.success(ServerInfo(url: wsURL, token: token)))
-        }.resume()
-    }
-
-    private static func resolvePartyServer(
-        partyCode: String,
-        region: ServerRegion,
-        completion: @escaping (Result<ServerInfo, Error>) -> Void
-    ) {
-        let endpoint = URL(string: "https://mc-api.agar.io/api/v1/server")!
-        var request = URLRequest(url: endpoint)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("https://agar.io", forHTTPHeaderField: "Origin")
-
-        let body: [String: Any] = [
-            "region": region.apiValue,
-            "mode": ":party",
-            "token": partyCode
-        ]
-        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-
-        URLSession.shared.dataTask(with: request) { data, response, error in
-            if let error = error {
-                completion(.failure(error))
-                return
-            }
-            guard let data = data,
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let endpoints = json["endpoints"] as? [[String: Any]],
-                  let first = endpoints.first,
-                  let serverURL = first["url"] as? String else {
-                completion(.failure(ServerError.noServerFound))
-                return
-            }
-            let token = (json["token"] as? String) ?? ""
-            let wsURL = serverURL.hasPrefix("wss://") ? serverURL : "wss://\(serverURL)"
+            let wsURL = server.hasPrefix("wss://") ? server : "wss://\(server)"
             completion(.success(ServerInfo(url: wsURL, token: token)))
         }.resume()
     }
@@ -89,11 +77,13 @@ class ServerResolver {
     enum ServerError: LocalizedError {
         case noServerFound
         case invalidResponse
+        case noAPIDiscovered
 
         var errorDescription: String? {
             switch self {
-            case .noServerFound: return "No server found for this region/mode"
-            case .invalidResponse: return "Invalid server response"
+            case .noServerFound: return "No server found"
+            case .invalidResponse: return "Invalid response"
+            case .noAPIDiscovered: return "Play one game first so XRD can discover the API"
             }
         }
     }

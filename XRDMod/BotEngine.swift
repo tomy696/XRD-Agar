@@ -18,26 +18,18 @@ class BotEngine: ObservableObject {
     func startBots(config: BotConfiguration) {
         guard !isRunning else { return }
         isRunning = true
+        statusMessage = "Resolving server..."
 
-        if let captured = NetworkInterceptor.shared.capturedServerURL {
-            let token = NetworkInterceptor.shared.capturedToken ?? ""
-            statusMessage = "Using captured server..."
-            let info = ServerResolver.ServerInfo(url: captured, token: token)
-            spawnBots(config: config, serverInfo: info)
-            startUIDDetection()
-        } else {
-            statusMessage = "Resolving server..."
-            ServerResolver.resolveServer(region: config.region, gameMode: config.gameMode, partyCode: config.partyCode) { [weak self] result in
-                DispatchQueue.main.async {
-                    switch result {
-                    case .success(let info):
-                        self?.statusMessage = "Server found. Spawning..."
-                        self?.spawnBots(config: config, serverInfo: info)
-                        self?.startUIDDetection()
-                    case .failure(let error):
-                        self?.statusMessage = "Error: \(error.localizedDescription)"
-                        self?.isRunning = false
-                    }
+        ServerResolver.resolveServer(region: config.region, gameMode: config.gameMode, partyCode: config.partyCode) { [weak self] result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let info):
+                    self?.statusMessage = "Spawning bots..."
+                    self?.spawnBots(config: config, serverInfo: info)
+                    self?.startUIDDetection()
+                case .failure(let error):
+                    self?.statusMessage = "Error: \(error.localizedDescription)"
+                    self?.isRunning = false
                 }
             }
         }

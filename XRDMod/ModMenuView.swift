@@ -41,18 +41,10 @@ struct ModMenuView: View {
                 .foregroundStyle(xrdGradient)
                 .shadow(color: xrdPurple.opacity(0.6), radius: 6)
             Spacer()
-            VStack(alignment: .trailing, spacing: 1) {
-                Text("MOD MENU")
-                    .font(.system(size: 7, weight: .bold, design: .monospaced))
-                    .foregroundColor(.gray)
-                    .tracking(2)
-                if let url = NetworkInterceptor.shared.capturedServerURL {
-                    Text(url.components(separatedBy: "//").last?.prefix(20) ?? "")
-                        .font(.system(size: 6, design: .monospaced))
-                        .foregroundColor(.green.opacity(0.6))
-                        .lineLimit(1)
-                }
-            }
+            Text("MOD MENU")
+                .font(.system(size: 7, weight: .bold, design: .monospaced))
+                .foregroundColor(.gray)
+                .tracking(2)
         }
         .padding(.horizontal, 10)
         .padding(.top, 8)
@@ -222,7 +214,7 @@ struct ModMenuView: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 infoRow("MASS", "\(settings.ownMass)")
-                infoRow("SERVER", NetworkInterceptor.shared.capturedServerURL != nil ? "Connected" : "Waiting...")
+                infoRow("API", NetworkInterceptor.shared.hasDiscoveredAPI ? "Ready" : "Play 1 game")
                 infoRow("PLAYERS", "\(settings.currentPlayers.count)")
             }
             .sectionStyle()
@@ -381,9 +373,9 @@ struct ModMenuView: View {
     private var statusBar: some View {
         HStack {
             Circle()
-                .fill(botEngine.isRunning ? Color.green : (NetworkInterceptor.shared.capturedServerURL != nil ? Color.orange : Color.gray.opacity(0.5)))
+                .fill(botEngine.isRunning ? Color.green : (NetworkInterceptor.shared.hasDiscoveredAPI ? Color.cyan : Color.gray.opacity(0.5)))
                 .frame(width: 5, height: 5)
-            Text(botEngine.isRunning ? botEngine.statusMessage : (NetworkInterceptor.shared.capturedServerURL != nil ? "Server captured" : "Waiting for game..."))
+            Text(botEngine.isRunning ? botEngine.statusMessage : (NetworkInterceptor.shared.hasDiscoveredAPI ? "API ready" : "Play 1 game to setup"))
                 .font(.system(size: 7, weight: .medium, design: .monospaced))
                 .foregroundColor(.gray)
                 .lineLimit(1)

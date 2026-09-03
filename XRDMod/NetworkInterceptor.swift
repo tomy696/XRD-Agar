@@ -9,6 +9,23 @@ class NetworkInterceptor: NSObject {
     var botSessions = NSHashTable<URLSession>.weakObjects()
     private var installed = false
 
+    private let defaults = UserDefaults.standard
+    private let apiKey = "XRD_discoveredAPI"
+    private let headersKey = "XRD_discoveredHeaders"
+    private let bodyFormatKey = "XRD_discoveredBodyFormat"
+
+    var discoveredAPIEndpoint: String? {
+        get { defaults.string(forKey: apiKey) }
+        set { defaults.set(newValue, forKey: apiKey) }
+    }
+
+    var discoveredHeaders: [String: String]? {
+        get { defaults.dictionary(forKey: headersKey) as? [String: String] }
+        set { defaults.set(newValue, forKey: headersKey) }
+    }
+
+    var hasDiscoveredAPI: Bool { discoveredAPIEndpoint != nil }
+
     func install() {
         guard !installed else { return }
         installed = true
@@ -35,23 +52,28 @@ class NetworkInterceptor: NSObject {
         }
     }
 
-    func handleAPIResponse(_ data: Data) {
+    func handleAPIRequest(_ request: URLRequest, responseData data: Data) {
+        guard let url = request.url?.absoluteString else { return }
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
 
         var serverURL: String?
         if let endpoints = json["endpoints"] as? [[String: Any]],
            let first = endpoints.first,
-           let url = first["url"] as? String {
-            serverURL = url
-        } else if let url = json["url"] as? String {
-            serverURL = url
-        } else if let url = json["server"] as? String {
-            serverURL = url
+           let u = first["url"] as? String {
+            serverURL = u
+        } else if let u = json["url"] as? String {
+            serverURL = u
+        } else if let u = json["server"] as? String {
+            serverURL = u
         }
 
         guard let server = serverURL else { return }
-        let wsURL = server.hasPrefix("wss://") ? server : "wss://\(server)"
+
         DispatchQueue.main.async {
+            self.discoveredAPIEndpoint = url
+            self.discoveredHeaders = request.allHTTPHeaderFields
+
+            let wsURL = server.hasPrefix("wss://") ? server : "wss://\(server)"
             self.capturedServerURL = wsURL
             self.capturedToken = (json["token"] as? String) ?? ""
             NotificationCenter.default.post(name: .xrdServerCaptured, object: nil)
@@ -86,9 +108,10 @@ extension URLSession {
             return self.xrd_dataTask(with: request, completionHandler: completionHandler)
         }
 
+        let capturedReq = request
         let wrapped: (Data?, URLResponse?, Error?) -> Void = { data, resp, err in
             if let data = data {
-                NetworkInterceptor.shared.handleAPIResponse(data)
+                NetworkInterceptor.shared.handleAPIRequest(capturedReq, responseData: data)
             }
             completionHandler(data, resp, err)
         }
