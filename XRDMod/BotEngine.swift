@@ -9,9 +9,12 @@ class BotEngine: ObservableObject {
     @Published var totalSpawned: Int = 0
     @Published var totalAlive: Int = 0
 
+    weak var settings: GameSettings?
+
     private var targetX: Double = 0
     private var targetY: Double = 0
     private var serverInfo: ServerResolver.ServerInfo?
+    private var uidTimer: Timer?
 
     func startBots(config: BotConfiguration) {
         guard !isRunning else { return }
@@ -29,6 +32,7 @@ class BotEngine: ObservableObject {
                     self?.serverInfo = info
                     self?.statusMessage = "Server found. Spawning bots..."
                     self?.spawnBots(config: config, serverInfo: info)
+                    self?.startUIDDetection()
                 case .failure(let error):
                     self?.statusMessage = "Error: \(error.localizedDescription)"
                     self?.isRunning = false
@@ -38,6 +42,8 @@ class BotEngine: ObservableObject {
     }
 
     func stopBots() {
+        uidTimer?.invalidate()
+        uidTimer = nil
         for bot in bots {
             bot.disconnect()
         }
@@ -61,6 +67,31 @@ class BotEngine: ObservableObject {
         updateTarget(x: player.x, y: player.y)
     }
 
+    // MARK: - UID Detection
+
+    private func startUIDDetection() {
+        uidTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            guard let self = self, let settings = self.settings else { return }
+            guard !settings.playerName.isEmpty else {
+                if !settings.detectedUID.isEmpty {
+                    DispatchQueue.main.async { settings.detectedUID = "" }
+                }
+                return
+            }
+            for bot in self.bots {
+                if let cell = bot.findCellByName(settings.playerName) {
+                    let uid = String(format: "%08X", cell.id)
+                    if settings.detectedUID != uid {
+                        DispatchQueue.main.async { settings.detectedUID = uid }
+                    }
+                    return
+                }
+            }
+        }
+    }
+
+    // MARK: - Spawning
+
     private func spawnBots(config: BotConfiguration, serverInfo: ServerResolver.ServerInfo) {
         let names = config.resolvedNames
         let batchSize = min(config.botCount, 50)
@@ -79,8 +110,7 @@ class BotEngine: ObservableObject {
                     action: config.botAction,
                     shouldSplit: config.shouldSplit
                 )
-                bot.autoTarget = config.autoTarget
-                bot.targetName = config.targetUID
+                bot.targetUID = config.targetUID
                 bot.delegate = self
                 bot.setTarget(x: self.targetX, y: self.targetY)
                 bot.connect()

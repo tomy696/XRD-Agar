@@ -37,13 +37,9 @@ struct BotConfigPanel: View {
             VStack(alignment: .leading, spacing: 5) {
                 sectionHeader("TARGET")
 
-                fieldRow("Auto") {
-                    cycleButton($settings.botConfig.autoTarget)
-                }
-
-                fieldRow("Name") {
+                fieldRow("UID") {
                     HStack(spacing: 4) {
-                        TextField("Target name", text: $settings.botConfig.targetUID)
+                        TextField("Target UID", text: $settings.botConfig.targetUID)
                             .textFieldStyle(XRDTextFieldStyle())
 
                         Button(action: {
@@ -58,18 +54,6 @@ struct BotConfigPanel: View {
                                 .background(Color.white.opacity(0.1))
                                 .cornerRadius(5)
                         }
-                    }
-                }
-
-                if let target = settings.targetPlayer {
-                    HStack {
-                        Text(target.name)
-                            .font(.system(size: 9, weight: .bold, design: .monospaced))
-                            .foregroundColor(xrdCyan)
-                        Spacer()
-                        Text("\(target.displayMass)")
-                            .font(.system(size: 9, design: .monospaced))
-                            .foregroundColor(.white.opacity(0.7))
                     }
                 }
             }

@@ -46,15 +46,6 @@ enum GameMode: String, CaseIterable, Identifiable {
     }
 }
 
-enum AutoTarget: String, CaseIterable, Identifiable {
-    case off = "Off"
-    case nearest = "Nearest"
-    case biggest = "Biggest"
-    case smallest = "Smallest"
-
-    var id: String { rawValue }
-}
-
 enum ServerRegion: String, CaseIterable, Identifiable {
     case usEast = "US East"
     case usWest = "US West"
@@ -97,7 +88,6 @@ struct BotConfiguration: Identifiable {
     var targetUID: String = ""
     var shouldSplit: Bool = true
     var botAction: BotAction = .suicide
-    var autoTarget: AutoTarget = .off
     var isRunning: Bool = false
 
     var resolvedNames: [String] {

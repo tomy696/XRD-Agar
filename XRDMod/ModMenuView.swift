@@ -179,6 +179,59 @@ struct ModMenuView: View {
             }
             .sectionStyle()
 
+            // My UID
+            VStack(alignment: .leading, spacing: 5) {
+                HStack {
+                    Text("MY UID")
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .foregroundColor(xrdCyan)
+                    Spacer()
+                    if !settings.detectedUID.isEmpty {
+                        Text(settings.detectedUID)
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            .foregroundColor(.white)
+                    }
+                }
+
+                HStack(spacing: 4) {
+                    Text("Name")
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .foregroundColor(.gray)
+                        .frame(width: 38, alignment: .leading)
+                    TextField("Your name", text: $settings.playerName)
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .background(Color.white.opacity(0.08))
+                        .cornerRadius(6)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                        )
+                }
+
+                Button(action: {
+                    if !settings.detectedUID.isEmpty {
+                        UIPasteboard.general.string = settings.detectedUID
+                    }
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "doc.on.doc")
+                            .font(.system(size: 10))
+                        Text(settings.detectedUID.isEmpty ? "ENTER NAME TO DETECT" : "COPY UID")
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 7)
+                    .background(settings.detectedUID.isEmpty ? Color.gray.opacity(0.3) : xrdPurple)
+                    .cornerRadius(6)
+                }
+                .disabled(settings.detectedUID.isEmpty)
+            }
+            .sectionStyle()
+
             // Info
             VStack(alignment: .leading, spacing: 3) {
                 infoRow("MASS", "\(settings.ownMass)")

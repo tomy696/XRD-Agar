@@ -29,6 +29,7 @@ class XRDOverlay: NSObject {
         }
 
         gameWindow = mainWindow
+        botEngine.settings = settings
         installContainer()
         observeLifecycle()
         setupObservers()

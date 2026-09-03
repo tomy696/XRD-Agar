@@ -17,6 +17,8 @@ class GameSettings: ObservableObject {
     @Published var licenseKey: String = ""
     @Published var isLicenseValid: Bool = false
     @Published var botConfig: BotConfiguration = BotConfiguration()
+    @Published var playerName: String = ""
+    @Published var detectedUID: String = ""
 
     var ownPosition: (x: Double, y: Double)? {
         let ownCells = currentPlayers.filter { ownCellIDs.contains($0.id) }
