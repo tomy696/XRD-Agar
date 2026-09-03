@@ -68,25 +68,29 @@ struct ContentView: View {
                 .padding(.leading, 12)
             }
 
-            // Mod Menu (draggable)
+            // Mod Menu (aligned right, draggable)
             if showMenu {
-                ModMenuView(settings: settings, botEngine: botEngine)
-                    .offset(
-                        x: menuOffset.width + dragOffset.width,
-                        y: menuOffset.height + dragOffset.height
-                    )
-                    .gesture(
-                        DragGesture()
-                            .onChanged { value in
-                                dragOffset = value.translation
-                            }
-                            .onEnded { value in
-                                menuOffset.width += value.translation.width
-                                menuOffset.height += value.translation.height
-                                dragOffset = .zero
-                            }
-                    )
-                    .transition(.scale(scale: 0.8).combined(with: .opacity))
+                HStack {
+                    Spacer()
+                    ModMenuView(settings: settings, botEngine: botEngine)
+                        .offset(
+                            x: menuOffset.width + dragOffset.width,
+                            y: menuOffset.height + dragOffset.height
+                        )
+                        .gesture(
+                            DragGesture()
+                                .onChanged { value in
+                                    dragOffset = value.translation
+                                }
+                                .onEnded { value in
+                                    menuOffset.width += value.translation.width
+                                    menuOffset.height += value.translation.height
+                                    dragOffset = .zero
+                                }
+                        )
+                        .padding(.trailing, 8)
+                }
+                .transition(.scale(scale: 0.8).combined(with: .opacity))
             }
         }
         .preferredColorScheme(.dark)

@@ -1,28 +1,30 @@
-name: XRD-Agar
+name: XRDMod
 options:
   bundleIdPrefix: com.xrd
   deploymentTarget:
     iOS: "15.0"
   xcodeVersion: "15.0"
-  generateEmptyDirectories: true
 
 targets:
-  XRD-Agar:
-    type: application
+  XRDMod:
+    type: framework
     platform: iOS
     sources:
-      - path: XRD-Agar
+      - path: XRDMod
         excludes:
-          - "Assets.xcassets"
+          - "inject.js"
+          - "Info.plist"
+    resources:
+      - path: XRDMod/inject.js
     settings:
       base:
-        INFOPLIST_FILE: XRD-Agar/Info.plist
-        PRODUCT_BUNDLE_IDENTIFIER: com.xrd.agar
+        INFOPLIST_FILE: XRDMod/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.xrd.mod
         MARKETING_VERSION: "1.0.0"
         CURRENT_PROJECT_VERSION: 1
         SWIFT_VERSION: "5.9"
         IPHONEOS_DEPLOYMENT_TARGET: "15.0"
         TARGETED_DEVICE_FAMILY: "1,2"
-        SUPPORTS_MACCATALYST: false
         CODE_SIGN_STYLE: Automatic
-        ENABLE_PREVIEWS: true
+        DEFINES_MODULE: YES
+        CLANG_ENABLE_MODULES: YES
