@@ -79,6 +79,8 @@ class BotEngine: ObservableObject {
                     action: config.botAction,
                     shouldSplit: config.shouldSplit
                 )
+                bot.autoTarget = config.autoTarget
+                bot.targetName = config.targetUID
                 bot.delegate = self
                 bot.setTarget(x: self.targetX, y: self.targetY)
                 bot.connect()

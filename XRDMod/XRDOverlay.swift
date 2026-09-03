@@ -80,6 +80,24 @@ class XRDOverlay: NSObject {
                 self?.updateMacroSize(CGFloat(size))
             }
             .store(in: &cancellables)
+
+        settings.$zoomLevel
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] level in
+                self?.applyZoom(CGFloat(level))
+            }
+            .store(in: &cancellables)
+    }
+
+    // MARK: - Zoom
+
+    private func applyZoom(_ scale: CGFloat) {
+        guard let window = gameWindow,
+              let rootView = window.rootViewController?.view else { return }
+        for subview in rootView.subviews where subview !== container {
+            subview.transform = CGAffineTransform(scaleX: scale, y: scale)
+        }
     }
 
     // MARK: - Lifecycle

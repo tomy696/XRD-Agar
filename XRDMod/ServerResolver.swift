@@ -25,7 +25,7 @@ class ServerResolver {
         request.setValue("https://agar.io", forHTTPHeaderField: "Origin")
 
         let body: [String: Any] = [
-            "region": region.rawValue,
+            "region": region.apiValue,
             "mode": gameMode.serverMode
         ]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
@@ -61,7 +61,7 @@ class ServerResolver {
         request.setValue("https://agar.io", forHTTPHeaderField: "Origin")
 
         let body: [String: Any] = [
-            "region": region.rawValue,
+            "region": region.apiValue,
             "mode": ":party",
             "token": partyCode
         ]

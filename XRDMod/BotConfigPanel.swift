@@ -18,23 +18,11 @@ struct BotConfigPanel: View {
                 sectionHeader("CONNECTION")
 
                 fieldRow("Region") {
-                    Picker("", selection: $settings.botConfig.region) {
-                        ForEach(ServerRegion.allCases) { r in
-                            Text(r.rawValue).tag(r)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .tint(xrdCyan)
+                    cycleButton($settings.botConfig.region)
                 }
 
                 fieldRow("Mode") {
-                    Picker("", selection: $settings.botConfig.gameMode) {
-                        ForEach(GameMode.allCases) { m in
-                            Text(m.rawValue).tag(m)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .tint(xrdCyan)
+                    cycleButton($settings.botConfig.gameMode)
                 }
 
                 if settings.botConfig.gameMode == .party {
@@ -50,18 +38,12 @@ struct BotConfigPanel: View {
                 sectionHeader("TARGET")
 
                 fieldRow("Auto") {
-                    Picker("", selection: $settings.botConfig.autoTarget) {
-                        ForEach(AutoTarget.allCases) { t in
-                            Text(t.rawValue).tag(t)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .tint(xrdCyan)
+                    cycleButton($settings.botConfig.autoTarget)
                 }
 
-                fieldRow("UID") {
+                fieldRow("Name") {
                     HStack(spacing: 4) {
-                        TextField("Paste UID", text: $settings.botConfig.targetUID)
+                        TextField("Target name", text: $settings.botConfig.targetUID)
                             .textFieldStyle(XRDTextFieldStyle())
 
                         Button(action: {
@@ -130,22 +112,11 @@ struct BotConfigPanel: View {
                 .tint(xrdPurple)
 
                 fieldRow("Boost") {
-                    Picker("", selection: $settings.botConfig.massBoost) {
-                        ForEach(MassBoost.allCases) { b in
-                            Text(b.rawValue).tag(b)
-                        }
-                    }
-                    .pickerStyle(.segmented)
+                    cycleButton($settings.botConfig.massBoost)
                 }
 
                 fieldRow("Action") {
-                    Picker("", selection: $settings.botConfig.botAction) {
-                        ForEach(BotAction.allCases) { a in
-                            Text(a.rawValue).tag(a)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .tint(xrdCyan)
+                    cycleButton($settings.botConfig.botAction)
                 }
 
                 Toggle(isOn: $settings.botConfig.shouldSplit) {
@@ -212,6 +183,36 @@ struct BotConfigPanel: View {
         botEngine.startBots(config: settings.botConfig)
     }
 
+    // MARK: - Cycle Button (replaces Picker to avoid rotation bug)
+
+    private func cycleButton<T: CaseIterable & RawRepresentable & Hashable>(
+        _ binding: Binding<T>
+    ) -> some View where T.RawValue == String, T.AllCases == [T] {
+        Button(action: {
+            let all = T.allCases
+            guard let idx = all.firstIndex(of: binding.wrappedValue) else { return }
+            let nextIdx = (idx + 1) % all.count
+            binding.wrappedValue = all[nextIdx]
+        }) {
+            HStack(spacing: 3) {
+                Text(binding.wrappedValue.rawValue)
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundColor(xrdCyan)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 6, weight: .bold))
+                    .foregroundColor(.gray)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(Color.white.opacity(0.08))
+            .cornerRadius(6)
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
+            )
+        }
+    }
+
     // MARK: - Helpers
 
     private func sectionHeader(_ title: String) -> some View {
@@ -222,10 +223,11 @@ struct BotConfigPanel: View {
     }
 
     private func fieldRow<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: 6) {
             Text(label)
                 .font(.system(size: 8, weight: .bold, design: .monospaced))
                 .foregroundColor(.gray)
+                .frame(width: 38, alignment: .leading)
             content()
         }
     }

@@ -19,9 +19,9 @@ enum MassBoost: String, CaseIterable, Identifiable {
 enum BotAction: String, CaseIterable, Identifiable {
     case suicide = "Suicide"
     case feedTarget = "Feed Target"
-    case destroyViruses = "Destroy Viruses"
-    case createCorpses = "Create Corpses"
-    case feedEverywhere = "Feed Everywhere"
+    case destroyViruses = "Destroy Virus"
+    case createCorpses = "Corpses"
+    case feedEverywhere = "Feed All"
 
     var id: String { rawValue }
 }
@@ -56,20 +56,33 @@ enum AutoTarget: String, CaseIterable, Identifiable {
 }
 
 enum ServerRegion: String, CaseIterable, Identifiable {
-    case euLondon = "EU-London"
-    case euFrankfurt = "EU-Frankfurt"
-    case usEast = "US-East"
-    case usWest = "US-West"
-    case usAtlanta = "US-Atlanta"
-    case saBrazil = "SA-Brazil"
-    case asiaChina = "Asia-China"
-    case asiaSingapore = "Asia-Singapore"
-    case jpTokyo = "JP-Tokyo"
+    case usEast = "US East"
+    case usWest = "US West"
+    case euWest = "EU West"
+    case southAmerica = "South America"
+    case russia = "Russia"
+    case eastAsia = "East Asia"
+    case china = "China"
+    case japan = "Japan"
     case oceania = "Oceania"
-    case turkeyIstanbul = "Turkey-Istanbul"
-    case ruRussia = "RU-Russia"
+    case turkey = "Turkey"
 
     var id: String { rawValue }
+
+    var apiValue: String {
+        switch self {
+        case .usEast: return "US-Atlanta"
+        case .usWest: return "US-Fremont"
+        case .euWest: return "EU-London"
+        case .southAmerica: return "BR-Brazil"
+        case .russia: return "RU-Russia"
+        case .eastAsia: return "SG-Singapore"
+        case .china: return "CN-China"
+        case .japan: return "JP-Tokyo"
+        case .oceania: return "Oceania"
+        case .turkey: return "TR-Turkey"
+        }
+    }
 }
 
 struct BotConfiguration: Identifiable {
@@ -78,7 +91,7 @@ struct BotConfiguration: Identifiable {
     var botNames: [String] = ["XRD Bot"]
     var useRandomNames: Bool = false
     var massBoost: MassBoost = .none
-    var region: ServerRegion = .euLondon
+    var region: ServerRegion = .euWest
     var gameMode: GameMode = .classic
     var partyCode: String = ""
     var targetUID: String = ""

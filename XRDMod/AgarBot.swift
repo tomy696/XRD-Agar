@@ -15,6 +15,8 @@ class AgarBot: NSObject, Identifiable {
     let massBoost: MassBoost
     let action: BotAction
     let shouldSplit: Bool
+    var autoTarget: AutoTarget = .off
+    var targetName: String = ""
 
     weak var delegate: AgarBotDelegate?
 
@@ -175,6 +177,7 @@ class AgarBot: NSObject, Identifiable {
             }
 
             if isAlive {
+                updateAutoTarget()
                 performAction()
             }
 
@@ -215,11 +218,53 @@ class AgarBot: NSObject, Identifiable {
         }
     }
 
+    // MARK: - Auto Target
+
+    private func updateAutoTarget() {
+        if !targetName.isEmpty {
+            if let cell = cells.values.first(where: {
+                !ownIDs.contains($0.id) && !$0.isVirus && $0.name == targetName
+            }) {
+                targetPosition = (Double(cell.x), Double(cell.y))
+                return
+            }
+        }
+
+        guard autoTarget != .off else { return }
+        guard let ownPos = ownPosition else { return }
+
+        let others = cells.values.filter {
+            !ownIDs.contains($0.id) && !$0.isVirus && $0.size > 10
+        }
+        guard !others.isEmpty else { return }
+
+        var chosen: CellUpdate?
+        switch autoTarget {
+        case .nearest:
+            chosen = others.min { a, b in
+                let dA = pow(Double(a.x) - ownPos.x, 2) + pow(Double(a.y) - ownPos.y, 2)
+                let dB = pow(Double(b.x) - ownPos.x, 2) + pow(Double(b.y) - ownPos.y, 2)
+                return dA < dB
+            }
+        case .biggest:
+            chosen = others.max { $0.size < $1.size }
+        case .smallest:
+            chosen = others.min { $0.size < $1.size }
+        case .off:
+            break
+        }
+
+        if let c = chosen {
+            targetPosition = (Double(c.x), Double(c.y))
+        }
+    }
+
     // MARK: - AI / Actions
 
     private func startMovementLoop() {
         moveTimer?.invalidate()
         moveTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+            self?.updateAutoTarget()
             self?.performAction()
         }
     }
