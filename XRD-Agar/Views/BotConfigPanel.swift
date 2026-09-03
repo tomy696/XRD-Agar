@@ -98,7 +98,7 @@ struct BotConfigPanel: View {
                         TextField("10", text: $botCountStr)
                             .textFieldStyle(XRDTextFieldStyle())
                             .frame(width: 60)
-                            .onChange(of: botCountStr) { _, val in
+                            .onChange(of: botCountStr) { val in
                                 settings.botConfig.botCount = Int(val) ?? 10
                             }
                         botCountButton(5)
@@ -111,7 +111,7 @@ struct BotConfigPanel: View {
                 fieldRow("Bot Names") {
                     TextField("Name (comma separated)", text: $nameInput)
                         .textFieldStyle(XRDTextFieldStyle())
-                        .onChange(of: nameInput) { _, val in
+                        .onChange(of: nameInput) { val in
                             settings.botConfig.botNames = val.split(separator: ",").map {
                                 String($0).trimmingCharacters(in: .whitespaces)
                             }
