@@ -1,4 +1,4 @@
-name: Build XRD IPA
+name: Build XRD Modded IPA
 
 on:
   push:
@@ -18,14 +18,26 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
+      - name: Build insert_dylib
+        run: |
+          git clone https://github.com/tyilo/insert_dylib /tmp/insert_dylib
+          cd /tmp/insert_dylib
+          xcodebuild -project insert_dylib.xcodeproj \
+            -scheme insert_dylib \
+            -configuration Release \
+            SYMROOT=/tmp/insert_dylib_build \
+            2>&1 | tail -5
+          sudo cp /tmp/insert_dylib_build/Release/insert_dylib /usr/local/bin/
+          echo "insert_dylib installed"
+
       - name: Generate Xcode Project
         run: xcodegen generate
 
-      - name: Build
+      - name: Build XRDMod Framework
         run: |
           xcodebuild build \
-            -project XRD-Agar.xcodeproj \
-            -scheme XRD-Agar \
+            -project XRDMod.xcodeproj \
+            -scheme XRDMod \
             -configuration Release \
             -sdk iphoneos \
             -derivedDataPath build/DerivedData \
@@ -34,17 +46,34 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGN_ENTITLEMENTS=""
 
-      - name: Create IPA
+      - name: Inject XRDMod into agar.io IPA
         run: |
-          mkdir -p build/Payload
-          cp -r build/DerivedData/Build/Products/Release-iphoneos/XRD-Agar.app build/Payload/
-          cd build
-          zip -r XRD-Agar.ipa Payload
-          ls -la XRD-Agar.ipa
+          mkdir -p /tmp/ipa_work
+          unzip -o agar.io.ipa -d /tmp/ipa_work
 
-      - name: Upload IPA
+          FRAMEWORK_SRC="build/DerivedData/Build/Products/Release-iphoneos/XRDMod.framework"
+          APP_DIR="/tmp/ipa_work/Payload/agar.io.app"
+
+          echo "Copying XRDMod.framework into app..."
+          cp -r "$FRAMEWORK_SRC" "$APP_DIR/Frameworks/XRDMod.framework"
+
+          echo "Injecting load command..."
+          insert_dylib --strip-codesig --inplace --all-yes \
+            "@rpath/XRDMod.framework/XRDMod" \
+            "$APP_DIR/agar.io"
+
+          echo "Removing old code signatures..."
+          rm -rf "$APP_DIR/_CodeSignature"
+          find "$APP_DIR/Frameworks" -name "_CodeSignature" -type d -exec rm -rf {} + 2>/dev/null || true
+
+          echo "Creating modded IPA..."
+          cd /tmp/ipa_work
+          zip -r "$GITHUB_WORKSPACE/XRD-Agar.ipa" Payload
+          ls -la "$GITHUB_WORKSPACE/XRD-Agar.ipa"
+
+      - name: Upload Modded IPA
         uses: actions/upload-artifact@v4
         with:
-          name: XRD-Agar-IPA
-          path: build/XRD-Agar.ipa
+          name: XRD-Agar-Modded-IPA
+          path: XRD-Agar.ipa
           retention-days: 30
