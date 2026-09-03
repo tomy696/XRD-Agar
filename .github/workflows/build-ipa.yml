@@ -15,10 +15,6 @@ jobs:
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
 
-      - name: Install iOS Simulator Runtime
-        run: |
-          xcodebuild -downloadPlatform iOS
-
       - name: Install XcodeGen
         run: brew install xcodegen
 
@@ -36,8 +32,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            CODE_SIGN_ENTITLEMENTS="" \
-            ENABLE_ON_DEMAND_RESOURCES=NO
+            CODE_SIGN_ENTITLEMENTS=""
 
       - name: Create IPA
         run: |
