@@ -21,23 +21,24 @@ jobs:
       - name: Generate Xcode Project
         run: xcodegen generate
 
-      - name: Build Archive
+      - name: Build
         run: |
-          xcodebuild archive \
+          xcodebuild build \
             -project XRD-Agar.xcodeproj \
             -scheme XRD-Agar \
             -configuration Release \
-            -archivePath build/XRD-Agar.xcarchive \
-            -destination "generic/platform=iOS" \
+            -sdk iphoneos \
+            -derivedDataPath build/DerivedData \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            CODE_SIGN_ENTITLEMENTS=""
+            CODE_SIGN_ENTITLEMENTS="" \
+            ENABLE_ON_DEMAND_RESOURCES=NO
 
       - name: Create IPA
         run: |
           mkdir -p build/Payload
-          cp -r build/XRD-Agar.xcarchive/Products/Applications/XRD-Agar.app build/Payload/
+          cp -r build/DerivedData/Build/Products/Release-iphoneos/XRD-Agar.app build/Payload/
           cd build
           zip -r XRD-Agar.ipa Payload
           ls -la XRD-Agar.ipa
