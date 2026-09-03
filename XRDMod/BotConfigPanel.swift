@@ -4,7 +4,6 @@ struct BotConfigPanel: View {
     @ObservedObject var settings: GameSettings
     @ObservedObject var botEngine: BotEngine
     @State private var nameInput: String = "XRD Bot"
-    @State private var customNames: String = ""
     @State private var botCountStr: String = "10"
 
     private var xrdPurple: Color { Color(red: 0.459, green: 0.318, blue: 0.957) }
@@ -14,25 +13,24 @@ struct BotConfigPanel: View {
     }
 
     var body: some View {
-        VStack(spacing: 12) {
-            // Connection Settings
-            VStack(alignment: .leading, spacing: 8) {
+        VStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 5) {
                 sectionHeader("CONNECTION")
 
                 fieldRow("Region") {
                     Picker("", selection: $settings.botConfig.region) {
-                        ForEach(ServerRegion.allCases) { region in
-                            Text(region.rawValue).tag(region)
+                        ForEach(ServerRegion.allCases) { r in
+                            Text(r.rawValue).tag(r)
                         }
                     }
                     .pickerStyle(.menu)
                     .tint(xrdCyan)
                 }
 
-                fieldRow("Game Mode") {
+                fieldRow("Mode") {
                     Picker("", selection: $settings.botConfig.gameMode) {
-                        ForEach(GameMode.allCases) { mode in
-                            Text(mode.rawValue).tag(mode)
+                        ForEach(GameMode.allCases) { m in
+                            Text(m.rawValue).tag(m)
                         }
                     }
                     .pickerStyle(.menu)
@@ -40,81 +38,84 @@ struct BotConfigPanel: View {
                 }
 
                 if settings.botConfig.gameMode == .party {
-                    fieldRow("Party Code") {
-                        TextField("Enter code", text: $settings.botConfig.partyCode)
+                    fieldRow("Party") {
+                        TextField("Code", text: $settings.botConfig.partyCode)
                             .textFieldStyle(XRDTextFieldStyle())
                     }
                 }
             }
             .sectionStyle()
 
-            // Target Settings
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 5) {
                 sectionHeader("TARGET")
 
-                fieldRow("Target UID") {
+                fieldRow("Auto") {
+                    Picker("", selection: $settings.botConfig.autoTarget) {
+                        ForEach(AutoTarget.allCases) { t in
+                            Text(t.rawValue).tag(t)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .tint(xrdCyan)
+                }
+
+                fieldRow("UID") {
                     HStack(spacing: 4) {
                         TextField("Paste UID", text: $settings.botConfig.targetUID)
                             .textFieldStyle(XRDTextFieldStyle())
 
                         Button(action: {
-                            if let clip = UIPasteboard.general.string {
-                                settings.botConfig.targetUID = clip
+                            if let s = UIPasteboard.general.string {
+                                settings.botConfig.targetUID = s
                             }
                         }) {
                             Image(systemName: "doc.on.clipboard")
-                                .font(.system(size: 12))
+                                .font(.system(size: 10))
                                 .foregroundColor(xrdCyan)
-                                .padding(6)
+                                .padding(5)
                                 .background(Color.white.opacity(0.1))
-                                .cornerRadius(6)
+                                .cornerRadius(5)
                         }
                     }
                 }
 
                 if let target = settings.targetPlayer {
                     HStack {
-                        Text("Target:")
-                            .font(.system(size: 10, weight: .medium, design: .monospaced))
-                            .foregroundColor(.gray)
                         Text(target.name)
-                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
                             .foregroundColor(xrdCyan)
                         Spacer()
-                        Text("\(target.displayMass) mass")
-                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        Text("\(target.displayMass)")
+                            .font(.system(size: 9, design: .monospaced))
                             .foregroundColor(.white.opacity(0.7))
                     }
                 }
             }
             .sectionStyle()
 
-            // Bot Settings
-            VStack(alignment: .leading, spacing: 8) {
-                sectionHeader("BOT CONFIG")
+            VStack(alignment: .leading, spacing: 5) {
+                sectionHeader("BOTS")
 
-                fieldRow("Bot Count") {
-                    HStack(spacing: 8) {
+                fieldRow("Count") {
+                    HStack(spacing: 4) {
                         TextField("10", text: $botCountStr)
                             .textFieldStyle(XRDTextFieldStyle())
-                            .frame(width: 60)
-                            .onChange(of: botCountStr) { val in
-                                settings.botConfig.botCount = Int(val) ?? 10
+                            .frame(width: 40)
+                            .onChange(of: botCountStr) { v in
+                                settings.botConfig.botCount = Int(v) ?? 10
                             }
-                        botCountButton(5)
-                        botCountButton(10)
-                        botCountButton(25)
-                        botCountButton(50)
+                        ForEach([5, 10, 25, 50], id: \.self) { n in
+                            cntBtn(n)
+                        }
                     }
                 }
 
-                fieldRow("Bot Names") {
-                    TextField("Name (comma separated)", text: $nameInput)
+                fieldRow("Names") {
+                    TextField("Comma sep.", text: $nameInput)
                         .textFieldStyle(XRDTextFieldStyle())
-                        .onChange(of: nameInput) { val in
-                            settings.botConfig.botNames = val.split(separator: ",").map {
-                                String($0).trimmingCharacters(in: .whitespaces)
-                            }
+                        .onChange(of: nameInput) { v in
+                            settings.botConfig.botNames = v.split(separator: ",")
+                                .map { String($0).trimmingCharacters(in: .whitespaces) }
                             if settings.botConfig.botNames.isEmpty {
                                 settings.botConfig.botNames = ["XRD Bot"]
                             }
@@ -122,16 +123,16 @@ struct BotConfigPanel: View {
                 }
 
                 Toggle(isOn: $settings.botConfig.useRandomNames) {
-                    Text("Random Names")
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    Text("Random")
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
                         .foregroundColor(.white)
                 }
                 .tint(xrdPurple)
 
-                fieldRow("Mass Boost") {
+                fieldRow("Boost") {
                     Picker("", selection: $settings.botConfig.massBoost) {
-                        ForEach(MassBoost.allCases) { boost in
-                            Text(boost.rawValue).tag(boost)
+                        ForEach(MassBoost.allCases) { b in
+                            Text(b.rawValue).tag(b)
                         }
                     }
                     .pickerStyle(.segmented)
@@ -139,8 +140,8 @@ struct BotConfigPanel: View {
 
                 fieldRow("Action") {
                     Picker("", selection: $settings.botConfig.botAction) {
-                        ForEach(BotAction.allCases) { action in
-                            Text(action.rawValue).tag(action)
+                        ForEach(BotAction.allCases) { a in
+                            Text(a.rawValue).tag(a)
                         }
                     }
                     .pickerStyle(.menu)
@@ -149,47 +150,47 @@ struct BotConfigPanel: View {
 
                 Toggle(isOn: $settings.botConfig.shouldSplit) {
                     Text("Split into target")
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
                         .foregroundColor(.white)
                 }
                 .tint(xrdPurple)
             }
             .sectionStyle()
 
-            // Launch / Stop
-            HStack(spacing: 12) {
+            HStack(spacing: 8) {
                 Button(action: launchBots) {
-                    HStack {
+                    HStack(spacing: 3) {
                         Image(systemName: "bolt.fill")
+                            .font(.system(size: 10))
                         Text("LAUNCH")
+                            .font(.system(size: 10, weight: .black, design: .monospaced))
                     }
-                    .font(.system(size: 13, weight: .black, design: .monospaced))
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
+                    .padding(.vertical, 10)
                     .background(xrdGradient)
-                    .cornerRadius(10)
+                    .cornerRadius(8)
                 }
                 .disabled(botEngine.isRunning)
                 .opacity(botEngine.isRunning ? 0.5 : 1)
 
                 Button(action: { botEngine.stopBots() }) {
-                    HStack {
+                    HStack(spacing: 3) {
                         Image(systemName: "stop.fill")
+                            .font(.system(size: 10))
                         Text("STOP")
+                            .font(.system(size: 10, weight: .black, design: .monospaced))
                     }
-                    .font(.system(size: 13, weight: .black, design: .monospaced))
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
+                    .padding(.vertical, 10)
                     .background(Color.red.opacity(0.8))
-                    .cornerRadius(10)
+                    .cornerRadius(8)
                 }
                 .disabled(!botEngine.isRunning)
                 .opacity(!botEngine.isRunning ? 0.5 : 1)
             }
 
-            // Stats
             if botEngine.isRunning {
                 HStack {
                     statPill("Spawned", "\(botEngine.totalSpawned)")
@@ -198,15 +199,15 @@ struct BotConfigPanel: View {
                 }
             }
 
-            Spacer(minLength: 20)
+            Spacer(minLength: 8)
         }
     }
 
     // MARK: - Actions
 
     private func launchBots() {
-        if let target = settings.targetPlayer {
-            botEngine.updateTargetFromPlayer(target)
+        if let t = settings.targetPlayer {
+            botEngine.updateTargetFromPlayer(t)
         }
         botEngine.startBots(config: settings.botConfig)
     }
@@ -215,48 +216,47 @@ struct BotConfigPanel: View {
 
     private func sectionHeader(_ title: String) -> some View {
         Text(title)
-            .font(.system(size: 10, weight: .black, design: .monospaced))
+            .font(.system(size: 8, weight: .black, design: .monospaced))
             .foregroundColor(xrdCyan)
-            .tracking(2)
+            .tracking(1.5)
     }
 
     private func fieldRow<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 2) {
             Text(label)
-                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .font(.system(size: 8, weight: .bold, design: .monospaced))
                 .foregroundColor(.gray)
             content()
         }
     }
 
-    private func botCountButton(_ count: Int) -> some View {
+    private func cntBtn(_ count: Int) -> some View {
         let isActive = settings.botConfig.botCount == count
-        let bg: Color = isActive ? xrdPurple : Color.white.opacity(0.1)
         return Button("\(count)") {
             botCountStr = "\(count)"
             settings.botConfig.botCount = count
         }
-        .font(.system(size: 10, weight: .bold, design: .monospaced))
+        .font(.system(size: 8, weight: .bold, design: .monospaced))
         .foregroundColor(.white)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(bg)
-        .cornerRadius(6)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(isActive ? xrdPurple : Color.white.opacity(0.1))
+        .cornerRadius(5)
     }
 
     private func statPill(_ label: String, _ value: String) -> some View {
-        VStack(spacing: 2) {
+        VStack(spacing: 1) {
             Text(value)
-                .font(.system(size: 16, weight: .black, design: .monospaced))
+                .font(.system(size: 12, weight: .black, design: .monospaced))
                 .foregroundColor(xrdCyan)
             Text(label)
-                .font(.system(size: 8, weight: .bold, design: .monospaced))
+                .font(.system(size: 7, weight: .bold, design: .monospaced))
                 .foregroundColor(.gray)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 8)
+        .padding(.vertical, 5)
         .background(Color.white.opacity(0.05))
-        .cornerRadius(8)
+        .cornerRadius(6)
     }
 }
 
@@ -265,14 +265,14 @@ struct BotConfigPanel: View {
 struct XRDTextFieldStyle: TextFieldStyle {
     func _body(configuration: TextField<Self._Label>) -> some View {
         configuration
-            .font(.system(size: 12, weight: .medium, design: .monospaced))
+            .font(.system(size: 10, weight: .medium, design: .monospaced))
             .foregroundColor(.white)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
             .background(Color.white.opacity(0.08))
-            .cornerRadius(8)
+            .cornerRadius(6)
             .overlay(
-                RoundedRectangle(cornerRadius: 8)
+                RoundedRectangle(cornerRadius: 6)
                     .stroke(Color.white.opacity(0.1), lineWidth: 1)
             )
     }

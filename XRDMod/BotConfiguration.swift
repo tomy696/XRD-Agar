@@ -27,7 +27,8 @@ enum BotAction: String, CaseIterable, Identifiable {
 }
 
 enum GameMode: String, CaseIterable, Identifiable {
-    case ffa = "FFA"
+    case classic = "Classic"
+    case burst = "Burst"
     case teams = "Teams"
     case experimental = "Experimental"
     case party = "Party"
@@ -36,12 +37,22 @@ enum GameMode: String, CaseIterable, Identifiable {
 
     var serverMode: String {
         switch self {
-        case .ffa: return ":ffa"
+        case .classic: return ":ffa"
+        case .burst: return ":rush"
         case .teams: return ":teams"
         case .experimental: return ":experimental"
         case .party: return ":party"
         }
     }
+}
+
+enum AutoTarget: String, CaseIterable, Identifiable {
+    case off = "Off"
+    case nearest = "Nearest"
+    case biggest = "Biggest"
+    case smallest = "Smallest"
+
+    var id: String { rawValue }
 }
 
 enum ServerRegion: String, CaseIterable, Identifiable {
@@ -68,11 +79,12 @@ struct BotConfiguration: Identifiable {
     var useRandomNames: Bool = false
     var massBoost: MassBoost = .none
     var region: ServerRegion = .euLondon
-    var gameMode: GameMode = .ffa
+    var gameMode: GameMode = .classic
     var partyCode: String = ""
     var targetUID: String = ""
     var shouldSplit: Bool = true
     var botAction: BotAction = .suicide
+    var autoTarget: AutoTarget = .off
     var isRunning: Bool = false
 
     var resolvedNames: [String] {

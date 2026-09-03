@@ -4,6 +4,7 @@ import SwiftUI
 class GameSettings: ObservableObject {
     @Published var zoomLevel: Double = 1.0
     @Published var isAutoFeeding: Bool = false
+    @Published var isMacroActive: Bool = false
     @Published var isMenuVisible: Bool = false
     @Published var currentPlayers: [PlayerInfo] = []
     @Published var targetPlayer: PlayerInfo? = nil

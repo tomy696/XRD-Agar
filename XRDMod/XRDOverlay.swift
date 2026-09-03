@@ -1,99 +1,116 @@
 import UIKit
 import SwiftUI
-import WebKit
 import Combine
+import ObjectiveC
 
 class XRDOverlay: NSObject {
     static let shared = XRDOverlay()
 
     let settings = GameSettings()
     let botEngine = BotEngine()
-    let bridge = GameJSBridge()
 
-    weak var capturedWebView: WKWebView?
     private var overlayWindow: XRDWindow?
-    private var toggleButton: UIButton?
+    private var toggleBtn: ToggleButton?
+    private var macroBtn: MacroButton?
     private var menuHosting: UIHostingController<AnyView>?
     private var licenseHosting: UIHostingController<AnyView>?
-    private var cancellables = Set<AnyCancellable>()
     private var isMenuVisible = false
-    private var scanTimer: Timer?
-    private var targetTimer: Timer?
+    private var macroTimer: Timer?
+
+    weak var capturedGameSocket: URLSessionWebSocketTask?
+    private static var didSwizzle = false
 
     func setup() {
-        bridge.settings = settings
-        setupObservers()
+        guard UIApplication.shared.connectedScenes.first(where: { $0 is UIWindowScene }) != nil else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                self?.setup()
+            }
+            return
+        }
+
         createWindow()
+        observeLifecycle()
+        hookNetwork()
 
         if LicenseManager.shared.isValid {
             showOverlayUI()
         } else {
             showLicenseView()
         }
-
-        startWebViewScan()
-        setupTargetTracking()
     }
 
-    // MARK: - Settings → JS bridge
+    // MARK: - Lifecycle
 
-    private func setupObservers() {
-        settings.$zoomLevel
-            .dropFirst()
-            .sink { [weak self] zoom in
-                self?.evaluateJS("if(window.XRD) XRD.setZoom(\(zoom));")
-            }
-            .store(in: &cancellables)
-
-        settings.$isAutoFeeding
-            .dropFirst()
-            .sink { [weak self] feeding in
-                self?.evaluateJS("if(window.XRD) XRD.setAutoFeed(\(feeding));")
-            }
-            .store(in: &cancellables)
+    private func observeLifecycle() {
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(appActivated),
+            name: UIApplication.didBecomeActiveNotification, object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(appActivated),
+            name: UIApplication.willEnterForegroundNotification, object: nil
+        )
     }
 
-    func evaluateJS(_ js: String) {
+    @objc private func appActivated() {
         DispatchQueue.main.async { [weak self] in
-            self?.capturedWebView?.evaluateJavaScript(js, completionHandler: nil)
+            guard let self = self else { return }
+            if self.overlayWindow == nil || self.overlayWindow?.isHidden == true {
+                self.createWindow()
+            }
+            if self.toggleBtn == nil && LicenseManager.shared.isValid {
+                self.showOverlayUI()
+            }
+            self.overlayWindow?.isHidden = false
         }
+    }
+
+    // MARK: - Network Hook (best-effort macro support)
+
+    private func hookNetwork() {
+        guard !XRDOverlay.didSwizzle else { return }
+        XRDOverlay.didSwizzle = true
+
+        let orig = #selector(URLSessionTask.resume)
+        let swiz = #selector(URLSessionTask.xrd_resume)
+        guard let origMethod = class_getInstanceMethod(URLSessionTask.self, orig),
+              let swizMethod = class_getInstanceMethod(URLSessionTask.self, swiz)
+        else { return }
+        method_exchangeImplementations(origMethod, swizMethod)
     }
 
     // MARK: - Window
 
     private func createWindow() {
-        guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene else { return }
-        let window = XRDWindow(windowScene: scene)
-        window.windowLevel = .alert + 1
-        window.backgroundColor = .clear
+        guard let scene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene }).first else { return }
 
-        let rootVC = UIViewController()
-        rootVC.view.backgroundColor = .clear
-        window.rootViewController = rootVC
-        window.isHidden = false
-
-        overlayWindow = window
+        let w = XRDWindow(windowScene: scene)
+        w.windowLevel = .alert + 1
+        w.backgroundColor = .clear
+        let vc = XRDRootVC()
+        vc.view.backgroundColor = .clear
+        w.rootViewController = vc
+        w.isHidden = false
+        overlayWindow = w
     }
 
     // MARK: - License
 
     private func showLicenseView() {
         guard let rootVC = overlayWindow?.rootViewController else { return }
-
-        let licenseView = LicenseView(licenseManager: LicenseManager.shared) { [weak self] in
+        let view = LicenseView(licenseManager: LicenseManager.shared) { [weak self] in
             self?.hideLicenseView()
             self?.showOverlayUI()
         }
-
-        let hosting = UIHostingController(rootView: AnyView(licenseView))
+        let hosting = UIHostingController(rootView: AnyView(view))
+        hosting.view.backgroundColor = UIColor.black.withAlphaComponent(0.9)
         hosting.view.frame = rootVC.view.bounds
         hosting.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         rootVC.addChild(hosting)
         rootVC.view.addSubview(hosting.view)
         hosting.didMove(toParent: rootVC)
-
         licenseHosting = hosting
-        overlayWindow?.makeKeyAndVisible()
     }
 
     private func hideLicenseView() {
@@ -101,68 +118,87 @@ class XRDOverlay: NSObject {
         licenseHosting?.view.removeFromSuperview()
         licenseHosting?.removeFromParent()
         licenseHosting = nil
-        overlayWindow?.resignKey()
     }
 
     // MARK: - Overlay UI
 
     private func showOverlayUI() {
         addToggleButton()
+        addMacroButton()
     }
 
     private func addToggleButton() {
-        guard let rootView = overlayWindow?.rootViewController?.view else { return }
+        guard let rv = overlayWindow?.rootViewController?.view else { return }
+        toggleBtn?.removeFromSuperview()
 
-        let btn = UIButton(type: .custom)
-        let screenW = UIScreen.main.bounds.width
-        btn.frame = CGRect(x: screenW - 62, y: 50, width: 50, height: 50)
-        btn.layer.cornerRadius = 25
-        btn.clipsToBounds = true
-        btn.backgroundColor = UIColor.black.withAlphaComponent(0.8)
-        btn.layer.borderWidth = 2
-        btn.layer.borderColor = UIColor(red: 0.459, green: 0.318, blue: 0.957, alpha: 1).cgColor
-        btn.setTitle("XRD", for: .normal)
-        btn.titleLabel?.font = .systemFont(ofSize: 12, weight: .black)
-        btn.setTitleColor(.white, for: .normal)
-        btn.addTarget(self, action: #selector(toggleMenu), for: .touchUpInside)
-
-        rootView.addSubview(btn)
-        toggleButton = btn
+        let btn = ToggleButton(frame: CGRect(x: rv.bounds.width - 52, y: 50, width: 40, height: 40))
+        btn.onTap = { [weak self] in self?.toggleMenu() }
+        rv.addSubview(btn)
+        toggleBtn = btn
     }
 
-    @objc private func toggleMenu() {
-        if isMenuVisible {
-            hideMenu()
-        } else {
-            showMenu()
+    private func addMacroButton() {
+        guard let rv = overlayWindow?.rootViewController?.view else { return }
+        macroBtn?.removeFromSuperview()
+
+        let btn = MacroButton(frame: CGRect(x: 60, y: rv.bounds.height - 90, width: 50, height: 50))
+        btn.onStart = { [weak self] in self?.startMacro() }
+        btn.onStop = { [weak self] in self?.stopMacro() }
+        rv.addSubview(btn)
+        macroBtn = btn
+    }
+
+    // MARK: - Macro
+
+    private func startMacro() {
+        settings.isMacroActive = true
+        macroTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+            self?.sendEjectPacket()
         }
+    }
+
+    private func stopMacro() {
+        settings.isMacroActive = false
+        macroTimer?.invalidate()
+        macroTimer = nil
+    }
+
+    private func sendEjectPacket() {
+        guard let ws = capturedGameSocket, ws.state == .running else { return }
+        ws.send(.data(Data([21]))) { _ in }
+    }
+
+    // MARK: - Menu
+
+    private func toggleMenu() {
+        if isMenuVisible { hideMenu() } else { showMenu() }
         isMenuVisible.toggle()
     }
 
     private func showMenu() {
         guard let rootVC = overlayWindow?.rootViewController else { return }
-        let rootView = rootVC.view!
+        let rv = rootVC.view!
 
-        let menuView = ModMenuView(settings: settings, botEngine: botEngine)
-        let hosting = UIHostingController(rootView: AnyView(menuView))
+        let menu = ModMenuView(settings: settings, botEngine: botEngine)
+        let hosting = UIHostingController(rootView: AnyView(menu))
         hosting.view.backgroundColor = .clear
 
-        let menuWidth: CGFloat = 340
-        let menuHeight: CGFloat = 520
-        let x = rootView.bounds.width - menuWidth - 8
-        let y = (rootView.bounds.height - menuHeight) / 2
-        hosting.view.frame = CGRect(x: x, y: y, width: menuWidth, height: menuHeight)
+        let menuW: CGFloat = 220
+        let menuH: CGFloat = 300
+        let x = rv.bounds.width - menuW - 12
+        let y = (rv.bounds.height - menuH) / 2
+        hosting.view.frame = CGRect(x: x, y: y, width: menuW, height: menuH)
 
         rootVC.addChild(hosting)
-        rootView.addSubview(hosting.view)
+        rv.addSubview(hosting.view)
         hosting.didMove(toParent: rootVC)
 
-        let pan = UIPanGestureRecognizer(target: self, action: #selector(handleMenuDrag(_:)))
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(dragMenu(_:)))
         hosting.view.addGestureRecognizer(pan)
 
         hosting.view.alpha = 0
-        hosting.view.transform = CGAffineTransform(scaleX: 0.8, y: 0.8)
-        UIView.animate(withDuration: 0.25, delay: 0, usingSpringWithDamping: 0.8, initialSpringVelocity: 0) {
+        hosting.view.transform = CGAffineTransform(scaleX: 0.85, y: 0.85)
+        UIView.animate(withDuration: 0.2, delay: 0, usingSpringWithDamping: 0.8, initialSpringVelocity: 0) {
             hosting.view.alpha = 1
             hosting.view.transform = .identity
         }
@@ -172,9 +208,9 @@ class XRDOverlay: NSObject {
 
     private func hideMenu() {
         guard let hosting = menuHosting else { return }
-        UIView.animate(withDuration: 0.2, animations: {
+        UIView.animate(withDuration: 0.15, animations: {
             hosting.view.alpha = 0
-            hosting.view.transform = CGAffineTransform(scaleX: 0.8, y: 0.8)
+            hosting.view.transform = CGAffineTransform(scaleX: 0.85, y: 0.85)
         }) { _ in
             hosting.willMove(toParent: nil)
             hosting.view.removeFromSuperview()
@@ -183,134 +219,11 @@ class XRDOverlay: NSObject {
         menuHosting = nil
     }
 
-    @objc private func handleMenuDrag(_ gesture: UIPanGestureRecognizer) {
-        guard let view = gesture.view else { return }
-        let translation = gesture.translation(in: view.superview)
-        view.center = CGPoint(x: view.center.x + translation.x, y: view.center.y + translation.y)
-        gesture.setTranslation(.zero, in: view.superview)
-    }
-
-    // MARK: - Target tracking
-
-    private func setupTargetTracking() {
-        bridge.onPlayersUpdated = { [weak self] players in
-            guard let self = self else { return }
-            let uid = self.settings.botConfig.targetUID
-            if !uid.isEmpty, let target = players.first(where: { $0.uid == uid }) {
-                self.settings.targetPlayer = target
-                self.botEngine.updateTargetFromPlayer(target)
-            }
-        }
-
-        targetTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
-            guard let self = self,
-                  let target = self.settings.targetPlayer,
-                  let updated = self.settings.currentPlayers.first(where: { $0.id == target.id }) else { return }
-            self.settings.targetPlayer = updated
-            self.botEngine.updateTargetFromPlayer(updated)
-        }
-    }
-
-    // MARK: - WebView scanning
-
-    private func startWebViewScan() {
-        scanTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] timer in
-            guard let self = self else { timer.invalidate(); return }
-            if let webView = self.findWebView() {
-                self.hookWebView(webView)
-                timer.invalidate()
-                self.scanTimer = nil
-            }
-        }
-    }
-
-    private func findWebView() -> WKWebView? {
-        let windows = UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .flatMap { $0.windows }
-
-        for window in windows {
-            if window === overlayWindow { continue }
-            if let wk = findWebViewIn(view: window) {
-                return wk
-            }
-        }
-        return nil
-    }
-
-    private func findWebViewIn(view: UIView) -> WKWebView? {
-        if let wk = view as? WKWebView { return wk }
-        for subview in view.subviews {
-            if let wk = findWebViewIn(view: subview) { return wk }
-        }
-        return nil
-    }
-
-    private func hookWebView(_ webView: WKWebView) {
-        capturedWebView = webView
-
-        let js: String
-        if let jsPath = Bundle(for: XRDLoader.self).path(forResource: "inject", ofType: "js"),
-           let content = try? String(contentsOfFile: jsPath, encoding: .utf8) {
-            js = content
-        } else {
-            js = injectedJSFallback
-
-        }
-
-        let script = WKUserScript(source: js, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
-        webView.configuration.userContentController.addUserScript(script)
-        webView.configuration.userContentController.removeScriptMessageHandler(forName: "xrdBridge")
-        webView.configuration.userContentController.add(bridge, name: "xrdBridge")
-
-        webView.evaluateJavaScript(js, completionHandler: nil)
-        settings.isConnected = true
-    }
-
-    // Inline JS fallback in case bundle resource loading fails
-    private var injectedJSFallback: String {
-        """
-        (function(){
-        'use strict';
-        if(window.XRD) return;
-        const XRD={zoomLevel:1,autoFeed:false,players:{},ownIDs:[],serverURL:'',activeWS:null,
-        init:function(){this.hookCanvas();this.hookWebSocket();this.startPlayerScan();this.setupFeedLoop()},
-        hookCanvas:function(){const o=HTMLCanvasElement.prototype.getContext;const s=this;
-        HTMLCanvasElement.prototype.getContext=function(t,a){const c=o.call(this,t,a);
-        if(t==='2d'&&this.width>100){const os=c.scale;c.scale=function(x,y){return os.call(this,x*s.zoomLevel,y*s.zoomLevel)}}return c}},
-        hookWebSocket:function(){const O=window.WebSocket;const s=this;
-        window.WebSocket=function(u,p){s.serverURL=u;s.notifyNative('serverURL',u);
-        const w=p?new O(u,p):new O(u);w.addEventListener('message',function(e){
-        if(e.data instanceof ArrayBuffer)s.parseServerMessage(new DataView(e.data))});s.activeWS=w;return w};
-        window.WebSocket.prototype=O.prototype;window.WebSocket.CONNECTING=O.CONNECTING;
-        window.WebSocket.OPEN=O.OPEN;window.WebSocket.CLOSING=O.CLOSING;window.WebSocket.CLOSED=O.CLOSED},
-        parseServerMessage:function(v){if(v.byteLength<1)return;const op=v.getUint8(0);
-        if(op===16)this.parseWorldUpdate(v);else if(op===50)this.parseOwnIDs(v)},
-        parseWorldUpdate:function(v){let o=1;if(o+2>v.byteLength)return;const ec=v.getUint16(o,true);o+=2;o+=ec*8;
-        while(o+4<=v.byteLength){const id=v.getUint32(o,true);o+=4;if(id===0)break;if(o+6>v.byteLength)break;
-        const x=v.getInt16(o,true);o+=2;const y=v.getInt16(o,true);o+=2;const sz=v.getInt16(o,true);o+=2;
-        if(o>=v.byteLength)break;const f=v.getUint8(o);o+=1;const iv=(f&1)!==0;const hc=(f&2)!==0;
-        const hs=(f&4)!==0;const hn=(f&8)!==0;const he=(f&0x80)!==0;if(he&&o<v.byteLength)o+=1;
-        if(hc&&o+3<=v.byteLength)o+=3;let sk='';if(hs){while(o<v.byteLength&&v.getUint8(o)!==0){
-        sk+=String.fromCharCode(v.getUint8(o));o++}if(o<v.byteLength)o++}let nm='';
-        if(hn){while(o<v.byteLength&&v.getUint8(o)!==0){nm+=String.fromCharCode(v.getUint8(o));o++}
-        if(o<v.byteLength)o++}if(!iv&&sz>10){this.players[id]={id:id,name:nm||('Cell_'+id),
-        x:x,y:y,mass:Math.floor(sz*sz/100),size:sz,uid:id.toString(16).toUpperCase().padStart(8,'0')}}}},
-        parseOwnIDs:function(v){this.ownIDs=[];for(let i=1;i+3<v.byteLength;i+=4)
-        this.ownIDs.push(v.getUint32(i,true));this.notifyNative('ownIDs',JSON.stringify(this.ownIDs))},
-        startPlayerScan:function(){setInterval(()=>{const pl=Object.values(this.players)
-        .filter(p=>!this.ownIDs.includes(p.id)).sort((a,b)=>b.mass-a.mass).slice(0,50);
-        this.notifyNative('players',JSON.stringify(pl))},500)},
-        setupFeedLoop:function(){setInterval(()=>{if(this.autoFeed&&this.activeWS&&this.activeWS.readyState===1){
-        const p=new ArrayBuffer(1);new DataView(p).setUint8(0,21);this.activeWS.send(p)}},80)},
-        setZoom:function(l){this.zoomLevel=l},
-        setAutoFeed:function(e){this.autoFeed=e},
-        getPlayerPosition:function(u){const p=Object.values(this.players).find(p=>p.uid===u);
-        return p?JSON.stringify({x:p.x,y:p.y,mass:p.mass}):null},
-        notifyNative:function(t,d){try{window.webkit.messageHandlers.xrdBridge.postMessage({type:t,data:d})}catch(e){}}};
-        if(document.readyState==='complete')XRD.init();else window.addEventListener('load',()=>XRD.init());
-        window.XRD=XRD})();
-        """
+    @objc private func dragMenu(_ g: UIPanGestureRecognizer) {
+        guard let v = g.view else { return }
+        let t = g.translation(in: v.superview)
+        v.center = CGPoint(x: v.center.x + t.x, y: v.center.y + t.y)
+        g.setTranslation(.zero, in: v.superview)
     }
 }
 
@@ -323,5 +236,133 @@ class XRDWindow: UIWindow {
             return nil
         }
         return result
+    }
+}
+
+// MARK: - Root VC
+
+class XRDRootVC: UIViewController {
+    override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .all }
+    override var shouldAutorotate: Bool { true }
+    override var prefersStatusBarHidden: Bool { true }
+}
+
+// MARK: - Toggle Button (draggable + tappable)
+
+class ToggleButton: UIView {
+    var onTap: (() -> Void)?
+    private var startCenter: CGPoint = .zero
+    private var moved = false
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = UIColor.black.withAlphaComponent(0.7)
+        layer.cornerRadius = frame.width / 2
+        layer.borderWidth = 1.5
+        layer.borderColor = UIColor(red: 0.459, green: 0.318, blue: 0.957, alpha: 1).cgColor
+        clipsToBounds = true
+
+        let lbl = UILabel(frame: bounds)
+        lbl.text = "XRD"
+        lbl.font = .systemFont(ofSize: 10, weight: .black)
+        lbl.textColor = .white
+        lbl.textAlignment = .center
+        lbl.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        addSubview(lbl)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        startCenter = center
+        moved = false
+        UIView.animate(withDuration: 0.1) { self.transform = CGAffineTransform(scaleX: 0.9, y: 0.9) }
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let t = touches.first else { return }
+        let loc = t.location(in: superview)
+        let prev = t.previousLocation(in: superview)
+        center = CGPoint(x: center.x + loc.x - prev.x, y: center.y + loc.y - prev.y)
+        if hypot(center.x - startCenter.x, center.y - startCenter.y) > 6 { moved = true }
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        UIView.animate(withDuration: 0.1) { self.transform = .identity }
+        if !moved { onTap?() }
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        UIView.animate(withDuration: 0.1) { self.transform = .identity }
+    }
+}
+
+// MARK: - Macro Button (hold = feed, draggable)
+
+class MacroButton: UIView {
+    var onStart: (() -> Void)?
+    var onStop: (() -> Void)?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = UIColor(red: 0.8, green: 0.15, blue: 0.15, alpha: 0.65)
+        layer.cornerRadius = frame.width / 2
+        layer.borderWidth = 2
+        layer.borderColor = UIColor(red: 1, green: 0.3, blue: 0.3, alpha: 0.8).cgColor
+        clipsToBounds = true
+
+        let lbl = UILabel(frame: bounds)
+        lbl.text = "W"
+        lbl.font = .systemFont(ofSize: 18, weight: .black)
+        lbl.textColor = .white
+        lbl.textAlignment = .center
+        lbl.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        addSubview(lbl)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        onStart?()
+        UIView.animate(withDuration: 0.1) {
+            self.backgroundColor = UIColor.red.withAlphaComponent(0.85)
+            self.transform = CGAffineTransform(scaleX: 1.12, y: 1.12)
+        }
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let t = touches.first else { return }
+        let loc = t.location(in: superview)
+        let prev = t.previousLocation(in: superview)
+        center = CGPoint(x: center.x + loc.x - prev.x, y: center.y + loc.y - prev.y)
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        onStop?()
+        UIView.animate(withDuration: 0.1) {
+            self.backgroundColor = UIColor(red: 0.8, green: 0.15, blue: 0.15, alpha: 0.65)
+            self.transform = .identity
+        }
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        onStop?()
+        UIView.animate(withDuration: 0.1) {
+            self.backgroundColor = UIColor(red: 0.8, green: 0.15, blue: 0.15, alpha: 0.65)
+            self.transform = .identity
+        }
+    }
+}
+
+// MARK: - URLSessionTask Swizzle
+
+extension URLSessionTask {
+    @objc func xrd_resume() {
+        if let ws = self as? URLSessionWebSocketTask,
+           let url = ws.originalRequest?.url?.absoluteString,
+           (url.contains("agar") || url.contains("miniclip")) {
+            XRDOverlay.shared.capturedGameSocket = ws
+        }
+        xrd_resume()
     }
 }
