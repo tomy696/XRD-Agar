@@ -3,7 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @StateObject private var settings = GameSettings()
     @StateObject private var botEngine = BotEngine()
-    @StateObject private var licenseManager = LicenseManager.shared
+    @ObservedObject private var licenseManager = LicenseManager.shared
     @State private var menuOffset: CGSize = .zero
     @State private var dragOffset: CGSize = .zero
     @State private var showMenu: Bool = false

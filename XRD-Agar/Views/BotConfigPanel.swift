@@ -98,29 +98,20 @@ struct BotConfigPanel: View {
                         TextField("10", text: $botCountStr)
                             .textFieldStyle(XRDTextFieldStyle())
                             .frame(width: 60)
-                            .onChange(of: botCountStr) { val in
+                            .onChange(of: botCountStr) { _, val in
                                 settings.botConfig.botCount = Int(val) ?? 10
                             }
-
-                        ForEach([5, 10, 25, 50], id: \.self) { count in
-                            Button("\(count)") {
-                                botCountStr = "\(count)"
-                                settings.botConfig.botCount = count
-                            }
-                            .font(.system(size: 10, weight: .bold, design: .monospaced))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(settings.botConfig.botCount == count ? xrdPurple : Color.white.opacity(0.1))
-                            .cornerRadius(6)
-                        }
+                        botCountButton(5)
+                        botCountButton(10)
+                        botCountButton(25)
+                        botCountButton(50)
                     }
                 }
 
                 fieldRow("Bot Names") {
                     TextField("Name (comma separated)", text: $nameInput)
                         .textFieldStyle(XRDTextFieldStyle())
-                        .onChange(of: nameInput) { val in
+                        .onChange(of: nameInput) { _, val in
                             settings.botConfig.botNames = val.split(separator: ",").map {
                                 String($0).trimmingCharacters(in: .whitespaces)
                             }
@@ -236,6 +227,21 @@ struct BotConfigPanel: View {
                 .foregroundColor(.gray)
             content()
         }
+    }
+
+    private func botCountButton(_ count: Int) -> some View {
+        let isActive = settings.botConfig.botCount == count
+        let bg: Color = isActive ? xrdPurple : Color.white.opacity(0.1)
+        return Button("\(count)") {
+            botCountStr = "\(count)"
+            settings.botConfig.botCount = count
+        }
+        .font(.system(size: 10, weight: .bold, design: .monospaced))
+        .foregroundColor(.white)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(bg)
+        .cornerRadius(6)
     }
 
     private func statPill(_ label: String, _ value: String) -> some View {

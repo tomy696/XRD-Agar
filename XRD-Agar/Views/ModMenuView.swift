@@ -56,23 +56,24 @@ struct ModMenuView: View {
     private var tabBar: some View {
         HStack(spacing: 0) {
             ForEach(MenuTab.allCases, id: \.self) { tab in
-                Button(action: { withAnimation(.easeInOut(duration: 0.2)) { activeTab = tab } }) {
-                    Text(tab.rawValue)
-                        .font(.system(size: 12, weight: .bold, design: .monospaced))
-                        .foregroundColor(activeTab == tab ? .white : .gray)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .background(
-                            activeTab == tab
-                                ? xrdGradient.opacity(0.3)
-                                : LinearGradient(colors: [.clear], startPoint: .leading, endPoint: .trailing)
-                        )
-                }
+                tabButton(tab)
             }
         }
         .background(Color.white.opacity(0.05))
         .cornerRadius(8)
         .padding(.horizontal, 12)
+    }
+
+    private func tabButton(_ tab: MenuTab) -> some View {
+        let isActive = activeTab == tab
+        return Button(action: { withAnimation(.easeInOut(duration: 0.2)) { activeTab = tab } }) {
+            Text(tab.rawValue)
+                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                .foregroundColor(isActive ? .white : .gray)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(isActive ? Color.purple.opacity(0.3) : Color.clear)
+        }
     }
 
     // MARK: - Tab Content
@@ -122,26 +123,7 @@ struct ModMenuView: View {
 
             // Auto Feed
             VStack(spacing: 8) {
-                Button(action: {
-                    settings.isAutoFeeding.toggle()
-                }) {
-                    HStack {
-                        Image(systemName: settings.isAutoFeeding ? "pause.circle.fill" : "play.circle.fill")
-                            .font(.system(size: 20))
-                        Text(settings.isAutoFeeding ? "STOP AUTO FEED" : "START AUTO FEED")
-                            .font(.system(size: 13, weight: .bold, design: .monospaced))
-                    }
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(
-                        settings.isAutoFeeding
-                            ? LinearGradient(colors: [.red, .orange], startPoint: .leading, endPoint: .trailing)
-                            : xrdGradient
-                    )
-                    .cornerRadius(10)
-                }
-
+                autoFeedButton
                 Text("Ejects mass continuously without holding W")
                     .font(.system(size: 9))
                     .foregroundColor(.gray)
@@ -165,7 +147,7 @@ struct ModMenuView: View {
                         .font(.system(size: 10, weight: .bold, design: .monospaced))
                         .foregroundColor(.gray)
                     Spacer()
-                    Text(settings.serverURL.isEmpty ? "N/A" : settings.serverURL.components(separatedBy: "//").last ?? "")
+                    Text(serverDisplayName)
                         .font(.system(size: 9, weight: .medium, design: .monospaced))
                         .foregroundColor(.white.opacity(0.7))
                         .lineLimit(1)
@@ -205,6 +187,31 @@ struct ModMenuView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .background(Color.white.opacity(0.03))
+    }
+
+    // MARK: - Extracted Subviews
+
+    private var autoFeedButton: some View {
+        let feeding = settings.isAutoFeeding
+        let icon = feeding ? "pause.circle.fill" : "play.circle.fill"
+        let label = feeding ? "STOP AUTO FEED" : "START AUTO FEED"
+        let bg = feeding ? Color.red : Color.purple
+        return Button(action: { settings.isAutoFeeding.toggle() }) {
+            HStack {
+                Image(systemName: icon).font(.system(size: 20))
+                Text(label).font(.system(size: 13, weight: .bold, design: .monospaced))
+            }
+            .foregroundColor(.white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .background(bg)
+            .cornerRadius(10)
+        }
+    }
+
+    private var serverDisplayName: String {
+        if settings.serverURL.isEmpty { return "N/A" }
+        return settings.serverURL.components(separatedBy: "//").last ?? "N/A"
     }
 
     // MARK: - Colors
