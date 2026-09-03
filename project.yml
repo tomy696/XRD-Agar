@@ -1,0 +1,27 @@
+name: XRD-Agar
+options:
+  bundleIdPrefix: com.xrd
+  deploymentTarget:
+    iOS: "15.0"
+  xcodeVersion: "15.0"
+  generateEmptyDirectories: true
+
+targets:
+  XRD-Agar:
+    type: application
+    platform: iOS
+    sources:
+      - XRD-Agar
+    settings:
+      base:
+        INFOPLIST_FILE: XRD-Agar/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.xrd.agar
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: 1
+        SWIFT_VERSION: "5.9"
+        IPHONEOS_DEPLOYMENT_TARGET: "15.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTS_MACCATALYST: false
+        CODE_SIGN_STYLE: Automatic
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_PREVIEWS: true

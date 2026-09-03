@@ -1,0 +1,48 @@
+name: Build XRD IPA
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode Project
+        run: xcodegen generate
+
+      - name: Build Archive
+        run: |
+          xcodebuild archive \
+            -project XRD-Agar.xcodeproj \
+            -scheme XRD-Agar \
+            -configuration Release \
+            -archivePath build/XRD-Agar.xcarchive \
+            -destination "generic/platform=iOS" \
+            -allowProvisioningUpdates \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS=""
+
+      - name: Create IPA
+        run: |
+          mkdir -p build/Payload
+          cp -r build/XRD-Agar.xcarchive/Products/Applications/XRD-Agar.app build/Payload/
+          cd build
+          zip -r XRD-Agar.ipa Payload
+          ls -la XRD-Agar.ipa
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: XRD-Agar-IPA
+          path: build/XRD-Agar.ipa
+          retention-days: 30

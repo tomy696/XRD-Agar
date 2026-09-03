@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>XRD Key Generator</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #0a0a0f;
+            color: #fff;
+            font-family: 'Courier New', monospace;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .container {
+            background: linear-gradient(135deg, #0d0d1a 0%, #1a0a2e 100%);
+            border: 2px solid #7551f4;
+            border-radius: 20px;
+            padding: 40px;
+            width: 480px;
+            box-shadow: 0 0 60px rgba(117, 81, 244, 0.3);
+        }
+        h1 {
+            text-align: center;
+            font-size: 42px;
+            font-weight: 900;
+            background: linear-gradient(135deg, #7551f4, #33cce6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 6px;
+        }
+        .subtitle {
+            text-align: center;
+            font-size: 10px;
+            color: #666;
+            letter-spacing: 4px;
+            margin-bottom: 30px;
+        }
+        label {
+            display: block;
+            font-size: 11px;
+            color: #33cce6;
+            letter-spacing: 2px;
+            font-weight: bold;
+            margin-bottom: 6px;
+            margin-top: 16px;
+        }
+        select, input[type="number"] {
+            width: 100%;
+            padding: 12px 16px;
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 10px;
+            color: #fff;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            outline: none;
+        }
+        select:focus, input:focus {
+            border-color: #7551f4;
+            box-shadow: 0 0 10px rgba(117, 81, 244, 0.3);
+        }
+        .duration-presets {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+        }
+        .preset-btn {
+            flex: 1;
+            padding: 8px;
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 8px;
+            color: #aaa;
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .preset-btn:hover, .preset-btn.active {
+            background: rgba(117, 81, 244, 0.3);
+            border-color: #7551f4;
+            color: #fff;
+        }
+        .generate-btn {
+            width: 100%;
+            padding: 16px;
+            margin-top: 24px;
+            background: linear-gradient(135deg, #7551f4, #33cce6);
+            border: none;
+            border-radius: 12px;
+            color: #fff;
+            font-family: 'Courier New', monospace;
+            font-size: 15px;
+            font-weight: 900;
+            letter-spacing: 2px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .generate-btn:hover {
+            transform: scale(1.02);
+            box-shadow: 0 0 30px rgba(117, 81, 244, 0.5);
+        }
+        .output {
+            margin-top: 20px;
+            padding: 16px;
+            background: rgba(0,0,0,0.5);
+            border: 1px solid rgba(117, 81, 244, 0.3);
+            border-radius: 10px;
+            display: none;
+        }
+        .output.visible { display: block; }
+        .key-display {
+            font-size: 13px;
+            color: #33cce6;
+            word-break: break-all;
+            line-height: 1.6;
+            padding: 10px;
+            background: rgba(255,255,255,0.03);
+            border-radius: 6px;
+            margin-bottom: 10px;
+        }
+        .copy-btn {
+            width: 100%;
+            padding: 10px;
+            background: rgba(117, 81, 244, 0.2);
+            border: 1px solid #7551f4;
+            border-radius: 8px;
+            color: #7551f4;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .copy-btn:hover { background: rgba(117, 81, 244, 0.4); }
+        .info {
+            margin-top: 8px;
+            font-size: 10px;
+            color: #555;
+        }
+        .warning {
+            margin-top: 20px;
+            padding: 10px;
+            background: rgba(255, 0, 0, 0.1);
+            border: 1px solid rgba(255, 0, 0, 0.2);
+            border-radius: 8px;
+            font-size: 10px;
+            color: #ff6666;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>XRD</h1>
+        <div class="subtitle">LICENSE KEY GENERATOR</div>
+
+        <label>DURATION</label>
+        <select id="durationSelect">
+            <option value="1">1 Hour</option>
+            <option value="6">6 Hours</option>
+            <option value="12">12 Hours</option>
+            <option value="24" selected>1 Day</option>
+            <option value="72">3 Days</option>
+            <option value="168">1 Week</option>
+            <option value="720">1 Month (30 days)</option>
+            <option value="2160">3 Months</option>
+            <option value="8760">1 Year</option>
+            <option value="custom">Custom...</option>
+        </select>
+
+        <div id="customDuration" style="display: none;">
+            <label>CUSTOM HOURS</label>
+            <input type="number" id="customHours" placeholder="Enter hours" min="1" max="87600">
+        </div>
+
+        <div class="duration-presets">
+            <button class="preset-btn" onclick="setDuration(1)">1H</button>
+            <button class="preset-btn" onclick="setDuration(24)">1D</button>
+            <button class="preset-btn" onclick="setDuration(168)">1W</button>
+            <button class="preset-btn active" onclick="setDuration(720)">1M</button>
+        </div>
+
+        <button class="generate-btn" onclick="generateKey()">GENERATE KEY</button>
+
+        <div class="output" id="output">
+            <div class="key-display" id="keyDisplay"></div>
+            <button class="copy-btn" onclick="copyKey()">COPY TO CLIPBOARD</button>
+            <div class="info" id="keyInfo"></div>
+        </div>
+
+        <div class="warning">
+            ADMIN ONLY — Do not share this page.
+        </div>
+    </div>
+
+    <script>
+        const SECRET = 'XRD-AGAR-SECRET-2024-ONLY-HE-KNOWS';
+
+        document.getElementById('durationSelect').addEventListener('change', function() {
+            const custom = document.getElementById('customDuration');
+            custom.style.display = this.value === 'custom' ? 'block' : 'none';
+        });
+
+        function setDuration(hours) {
+            document.getElementById('durationSelect').value = hours;
+            document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+            event.target.classList.add('active');
+        }
+
+        async function generateKey() {
+            const select = document.getElementById('durationSelect');
+            let hours = parseInt(select.value);
+            if (select.value === 'custom') {
+                hours = parseInt(document.getElementById('customHours').value) || 24;
+            }
+
+            const timestamp = Math.floor(Date.now() / 1000);
+            const payload = `${timestamp}|${hours}`;
+            const payloadB64 = btoa(payload);
+
+            const signature = await hmacSHA256(payloadB64, SECRET);
+            const sigPrefix = signature.substring(0, 16);
+
+            const key = `XRD-${payloadB64}-${sigPrefix}`;
+
+            const output = document.getElementById('output');
+            const display = document.getElementById('keyDisplay');
+            const info = document.getElementById('keyInfo');
+
+            display.textContent = key;
+            output.classList.add('visible');
+
+            const expiry = new Date((timestamp + hours * 3600) * 1000);
+            info.textContent = `Expires: ${expiry.toLocaleString()} (${hours}h from now)`;
+        }
+
+        function copyKey() {
+            const key = document.getElementById('keyDisplay').textContent;
+            navigator.clipboard.writeText(key).then(() => {
+                const btn = document.querySelector('.copy-btn');
+                btn.textContent = 'COPIED!';
+                setTimeout(() => btn.textContent = 'COPY TO CLIPBOARD', 2000);
+            });
+        }
+
+        function hmacSHA256(message, secret) {
+            function sha256(data) {
+                const K = [
+                    0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+                    0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+                    0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+                    0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+                    0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+                    0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+                    0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+                    0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
+                ];
+                let H = [0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+                const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
+                const bits = bytes.length * 8;
+                const padded = new Uint8Array(Math.ceil((bytes.length + 9) / 64) * 64);
+                padded.set(bytes);
+                padded[bytes.length] = 0x80;
+                const dv = new DataView(padded.buffer);
+                dv.setUint32(padded.length - 4, bits, false);
+
+                for (let off = 0; off < padded.length; off += 64) {
+                    const W = new Int32Array(64);
+                    for (let i = 0; i < 16; i++) W[i] = dv.getInt32(off + i * 4, false);
+                    for (let i = 16; i < 64; i++) {
+                        const s0 = (rotr(W[i-15],7)^rotr(W[i-15],18)^(W[i-15]>>>3));
+                        const s1 = (rotr(W[i-2],17)^rotr(W[i-2],19)^(W[i-2]>>>10));
+                        W[i] = (W[i-16]+s0+W[i-7]+s1)|0;
+                    }
+                    let [a,b,c,d,e,f,g,h] = H;
+                    for (let i = 0; i < 64; i++) {
+                        const S1 = rotr(e,6)^rotr(e,11)^rotr(e,25);
+                        const ch = (e&f)^((~e)&g);
+                        const t1 = (h+S1+ch+K[i]+W[i])|0;
+                        const S0 = rotr(a,2)^rotr(a,13)^rotr(a,22);
+                        const maj = (a&b)^(a&c)^(b&c);
+                        const t2 = (S0+maj)|0;
+                        h=g; g=f; f=e; e=(d+t1)|0; d=c; c=b; b=a; a=(t1+t2)|0;
+                    }
+                    H = [H[0]+a|0,H[1]+b|0,H[2]+c|0,H[3]+d|0,H[4]+e|0,H[5]+f|0,H[6]+g|0,H[7]+h|0];
+                }
+                const result = new Uint8Array(32);
+                H.forEach((h,i) => { result[i*4]=(h>>>24)&0xff; result[i*4+1]=(h>>>16)&0xff; result[i*4+2]=(h>>>8)&0xff; result[i*4+3]=h&0xff; });
+                return result;
+            }
+            function rotr(n, b) { return (n >>> b) | (n << (32 - b)); }
+
+            const enc = new TextEncoder();
+            let keyBytes = enc.encode(secret);
+            if (keyBytes.length > 64) keyBytes = sha256(keyBytes);
+            const ipad = new Uint8Array(64), opad = new Uint8Array(64);
+            for (let i = 0; i < 64; i++) {
+                const k = i < keyBytes.length ? keyBytes[i] : 0;
+                ipad[i] = k ^ 0x36;
+                opad[i] = k ^ 0x5c;
+            }
+            const msgBytes = enc.encode(message);
+            const inner = new Uint8Array(64 + msgBytes.length);
+            inner.set(ipad); inner.set(msgBytes, 64);
+            const innerHash = sha256(inner);
+            const outer = new Uint8Array(64 + 32);
+            outer.set(opad); outer.set(innerHash, 64);
+            const result = sha256(outer);
+            return Array.from(result).map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+    </script>
+</body>
+</html>
