@@ -14,16 +14,25 @@ struct BotConfigPanel: View {
 
     var body: some View {
         VStack(spacing: 8) {
+            if NetworkInterceptor.shared.capturedServerURL == nil {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 10))
+                        .foregroundColor(.orange)
+                    Text("Play a game first to capture server")
+                        .font(.system(size: 8, weight: .medium, design: .monospaced))
+                        .foregroundColor(.orange)
+                }
+                .padding(6)
+                .frame(maxWidth: .infinity)
+                .background(Color.orange.opacity(0.1))
+                .cornerRadius(6)
+            }
+
             VStack(alignment: .leading, spacing: 5) {
                 sectionHeader("CONNECTION")
-
-                fieldRow("Region") {
-                    cycleButton($settings.botConfig.region)
-                }
-
-                fieldRow("Mode") {
-                    cycleButton($settings.botConfig.gameMode)
-                }
+                XRDDropdown(label: "Region", selection: $settings.botConfig.region)
+                XRDDropdown(label: "Mode", selection: $settings.botConfig.gameMode)
 
                 if settings.botConfig.gameMode == .party {
                     fieldRow("Party") {
@@ -36,12 +45,10 @@ struct BotConfigPanel: View {
 
             VStack(alignment: .leading, spacing: 5) {
                 sectionHeader("TARGET")
-
                 fieldRow("UID") {
                     HStack(spacing: 4) {
                         TextField("Target UID", text: $settings.botConfig.targetUID)
                             .textFieldStyle(XRDTextFieldStyle())
-
                         Button(action: {
                             if let s = UIPasteboard.general.string {
                                 settings.botConfig.targetUID = s
@@ -66,13 +73,11 @@ struct BotConfigPanel: View {
                     HStack(spacing: 4) {
                         TextField("10", text: $botCountStr)
                             .textFieldStyle(XRDTextFieldStyle())
-                            .frame(width: 40)
+                            .frame(width: 35)
                             .onChange(of: botCountStr) { v in
                                 settings.botConfig.botCount = Int(v) ?? 10
                             }
-                        ForEach([5, 10, 25, 50], id: \.self) { n in
-                            cntBtn(n)
-                        }
+                        ForEach([5, 10, 25, 50], id: \.self) { n in cntBtn(n) }
                     }
                 }
 
@@ -89,23 +94,18 @@ struct BotConfigPanel: View {
                 }
 
                 Toggle(isOn: $settings.botConfig.useRandomNames) {
-                    Text("Random")
-                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    Text("Random names")
+                        .font(.system(size: 8, weight: .medium, design: .monospaced))
                         .foregroundColor(.white)
                 }
                 .tint(xrdPurple)
 
-                fieldRow("Boost") {
-                    cycleButton($settings.botConfig.massBoost)
-                }
-
-                fieldRow("Action") {
-                    cycleButton($settings.botConfig.botAction)
-                }
+                XRDDropdown(label: "Boost", selection: $settings.botConfig.massBoost)
+                XRDDropdown(label: "Action", selection: $settings.botConfig.botAction)
 
                 Toggle(isOn: $settings.botConfig.shouldSplit) {
                     Text("Split into target")
-                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .font(.system(size: 8, weight: .medium, design: .monospaced))
                         .foregroundColor(.white)
                 }
                 .tint(xrdPurple)
@@ -115,8 +115,7 @@ struct BotConfigPanel: View {
             HStack(spacing: 8) {
                 Button(action: launchBots) {
                     HStack(spacing: 3) {
-                        Image(systemName: "bolt.fill")
-                            .font(.system(size: 10))
+                        Image(systemName: "bolt.fill").font(.system(size: 10))
                         Text("LAUNCH")
                             .font(.system(size: 10, weight: .black, design: .monospaced))
                     }
@@ -131,8 +130,7 @@ struct BotConfigPanel: View {
 
                 Button(action: { botEngine.stopBots() }) {
                     HStack(spacing: 3) {
-                        Image(systemName: "stop.fill")
-                            .font(.system(size: 10))
+                        Image(systemName: "stop.fill").font(.system(size: 10))
                         Text("STOP")
                             .font(.system(size: 10, weight: .black, design: .monospaced))
                     }
@@ -167,36 +165,6 @@ struct BotConfigPanel: View {
         botEngine.startBots(config: settings.botConfig)
     }
 
-    // MARK: - Cycle Button (replaces Picker to avoid rotation bug)
-
-    private func cycleButton<T: CaseIterable & RawRepresentable & Hashable>(
-        _ binding: Binding<T>
-    ) -> some View where T.RawValue == String, T.AllCases == [T] {
-        Button(action: {
-            let all = T.allCases
-            guard let idx = all.firstIndex(of: binding.wrappedValue) else { return }
-            let nextIdx = (idx + 1) % all.count
-            binding.wrappedValue = all[nextIdx]
-        }) {
-            HStack(spacing: 3) {
-                Text(binding.wrappedValue.rawValue)
-                    .font(.system(size: 9, weight: .bold, design: .monospaced))
-                    .foregroundColor(xrdCyan)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 6, weight: .bold))
-                    .foregroundColor(.gray)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(Color.white.opacity(0.08))
-            .cornerRadius(6)
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
-            )
-        }
-    }
-
     // MARK: - Helpers
 
     private func sectionHeader(_ title: String) -> some View {
@@ -224,7 +192,7 @@ struct BotConfigPanel: View {
         }
         .font(.system(size: 8, weight: .bold, design: .monospaced))
         .foregroundColor(.white)
-        .padding(.horizontal, 6)
+        .padding(.horizontal, 5)
         .padding(.vertical, 3)
         .background(isActive ? xrdPurple : Color.white.opacity(0.1))
         .cornerRadius(5)
@@ -243,6 +211,75 @@ struct BotConfigPanel: View {
         .padding(.vertical, 5)
         .background(Color.white.opacity(0.05))
         .cornerRadius(6)
+    }
+}
+
+// MARK: - Custom Dropdown (no rotation bug)
+
+struct XRDDropdown<T: CaseIterable & RawRepresentable & Hashable>: View where T.RawValue == String, T.AllCases == [T] {
+    let label: String
+    @Binding var selection: T
+    @State private var isExpanded = false
+
+    private var xrdCyan: Color { Color(red: 0.2, green: 0.8, blue: 0.9) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button(action: {
+                withAnimation(.easeInOut(duration: 0.15)) { isExpanded.toggle() }
+            }) {
+                HStack {
+                    Text(label)
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .foregroundColor(.gray)
+                        .frame(width: 42, alignment: .leading)
+                    Text(selection.rawValue)
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundColor(xrdCyan)
+                    Spacer()
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 7, weight: .bold))
+                        .foregroundColor(.gray)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(Color.white.opacity(0.06))
+                .cornerRadius(6)
+            }
+
+            if isExpanded {
+                VStack(spacing: 0) {
+                    ForEach(Array(T.allCases), id: \.self) { option in
+                        Button(action: {
+                            selection = option
+                            withAnimation(.easeInOut(duration: 0.15)) { isExpanded = false }
+                        }) {
+                            HStack {
+                                Text(option.rawValue)
+                                    .font(.system(size: 9, design: .monospaced))
+                                    .foregroundColor(option == selection ? xrdCyan : .white.opacity(0.7))
+                                Spacer()
+                                if option == selection {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 7, weight: .bold))
+                                        .foregroundColor(xrdCyan)
+                                }
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(option == selection ? Color.white.opacity(0.06) : Color.clear)
+                        }
+                    }
+                }
+                .background(Color.black.opacity(0.95))
+                .cornerRadius(6)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                )
+                .padding(.top, 2)
+            }
+        }
     }
 }
 

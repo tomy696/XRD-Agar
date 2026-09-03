@@ -19,6 +19,8 @@ class XRDOverlay: NSObject {
     private var cancellables = Set<AnyCancellable>()
 
     func setup() {
+        NetworkInterceptor.shared.install()
+
         guard let scene = UIApplication.shared.connectedScenes
             .compactMap({ $0 as? UIWindowScene }).first,
             let mainWindow = scene.windows.first else {
@@ -30,6 +32,7 @@ class XRDOverlay: NSObject {
 
         gameWindow = mainWindow
         botEngine.settings = settings
+        settings.load()
         installContainer()
         observeLifecycle()
         setupObservers()
@@ -89,6 +92,14 @@ class XRDOverlay: NSObject {
                 self?.applyZoom(CGFloat(level))
             }
             .store(in: &cancellables)
+
+        settings.$macroDragMode
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] drag in
+                self?.macroBtn?.isDragMode = drag
+            }
+            .store(in: &cancellables)
     }
 
     // MARK: - Zoom
@@ -146,6 +157,7 @@ class XRDOverlay: NSObject {
 
     private func showOverlayUI() {
         addToggleButton()
+        if settings.isMacroEnabled { addMacroButton() }
     }
 
     private func addToggleButton() {
@@ -171,6 +183,7 @@ class XRDOverlay: NSObject {
         let size = CGFloat(settings.macroButtonSize)
         let btn = MacroButton(frame: CGRect(x: 50, y: c.bounds.height - size - 50, width: size, height: size))
         btn.autoresizingMask = [.flexibleTopMargin, .flexibleRightMargin]
+        btn.isDragMode = settings.macroDragMode
         btn.onStart = { [weak self] in self?.startMacro() }
         btn.onStop = { [weak self] in self?.stopMacro() }
         c.addSubview(btn)
@@ -221,8 +234,8 @@ class XRDOverlay: NSObject {
         let hosting = UIHostingController(rootView: AnyView(menu))
         hosting.view.backgroundColor = .clear
 
-        let menuW: CGFloat = 220
-        let menuH: CGFloat = 310
+        let menuW: CGFloat = 210
+        let menuH: CGFloat = 300
         let x = c.bounds.width - menuW - 8
         let y: CGFloat = 85
         let finalFrame = CGRect(x: x, y: y, width: menuW, height: menuH)
@@ -267,9 +280,7 @@ class XRDPassthroughView: UIView {
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
         for sub in subviews where !sub.isHidden && sub.alpha > 0.01 && sub.isUserInteractionEnabled {
             let p = convert(point, to: sub)
-            if sub.point(inside: p, with: event) {
-                return true
-            }
+            if sub.point(inside: p, with: event) { return true }
         }
         return false
     }
@@ -331,11 +342,12 @@ class ToggleButton: UIView {
     }
 }
 
-// MARK: - Macro Button (spider web style, draggable)
+// MARK: - Macro Button (drag mode vs use mode)
 
 class MacroButton: UIView {
     var onStart: (() -> Void)?
     var onStop: (() -> Void)?
+    var isDragMode: Bool = false
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -355,7 +367,10 @@ class MacroButton: UIView {
         ctx.setFillColor(UIColor(white: 0.18, alpha: 0.55).cgColor)
         ctx.fillEllipse(in: bounds.insetBy(dx: 1, dy: 1))
 
-        ctx.setStrokeColor(UIColor(white: 0.55, alpha: 0.45).cgColor)
+        let borderColor = isDragMode
+            ? UIColor(red: 1, green: 0.6, blue: 0, alpha: 0.7).cgColor
+            : UIColor(white: 0.55, alpha: 0.45).cgColor
+        ctx.setStrokeColor(borderColor)
         ctx.setLineWidth(1.5)
         ctx.strokeEllipse(in: bounds.insetBy(dx: 1, dy: 1))
 
@@ -382,9 +397,20 @@ class MacroButton: UIView {
             UIColor(white: 1, alpha: 0.2).setStroke()
             path.stroke()
         }
+
+        if isDragMode {
+            let icon = "DRAG"
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 8, weight: .bold),
+                .foregroundColor: UIColor.orange
+            ]
+            let size = (icon as NSString).size(withAttributes: attrs)
+            (icon as NSString).draw(at: CGPoint(x: c.x - size.width / 2, y: c.y - size.height / 2), withAttributes: attrs)
+        }
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if isDragMode { return }
         onStart?()
         UIView.animate(withDuration: 0.1) {
             self.transform = CGAffineTransform(scaleX: 1.1, y: 1.1)
@@ -393,6 +419,7 @@ class MacroButton: UIView {
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard isDragMode else { return }
         guard let t = touches.first else { return }
         let loc = t.location(in: superview)
         let prev = t.previousLocation(in: superview)
@@ -400,6 +427,7 @@ class MacroButton: UIView {
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if isDragMode { return }
         onStop?()
         UIView.animate(withDuration: 0.1) {
             self.transform = .identity
@@ -408,6 +436,7 @@ class MacroButton: UIView {
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if isDragMode { return }
         onStop?()
         UIView.animate(withDuration: 0.1) {
             self.transform = .identity

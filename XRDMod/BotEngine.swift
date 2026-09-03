@@ -13,29 +13,31 @@ class BotEngine: ObservableObject {
 
     private var targetX: Double = 0
     private var targetY: Double = 0
-    private var serverInfo: ServerResolver.ServerInfo?
     private var uidTimer: Timer?
 
     func startBots(config: BotConfiguration) {
         guard !isRunning else { return }
         isRunning = true
-        statusMessage = "Resolving server..."
 
-        let region = config.region
-        let mode = config.gameMode
-        let partyCode = config.partyCode
-
-        ServerResolver.resolveServer(region: region, gameMode: mode, partyCode: partyCode) { [weak self] result in
-            DispatchQueue.main.async {
-                switch result {
-                case .success(let info):
-                    self?.serverInfo = info
-                    self?.statusMessage = "Server found. Spawning bots..."
-                    self?.spawnBots(config: config, serverInfo: info)
-                    self?.startUIDDetection()
-                case .failure(let error):
-                    self?.statusMessage = "Error: \(error.localizedDescription)"
-                    self?.isRunning = false
+        if let captured = NetworkInterceptor.shared.capturedServerURL {
+            let token = NetworkInterceptor.shared.capturedToken ?? ""
+            statusMessage = "Using captured server..."
+            let info = ServerResolver.ServerInfo(url: captured, token: token)
+            spawnBots(config: config, serverInfo: info)
+            startUIDDetection()
+        } else {
+            statusMessage = "Resolving server..."
+            ServerResolver.resolveServer(region: config.region, gameMode: config.gameMode, partyCode: config.partyCode) { [weak self] result in
+                DispatchQueue.main.async {
+                    switch result {
+                    case .success(let info):
+                        self?.statusMessage = "Server found. Spawning..."
+                        self?.spawnBots(config: config, serverInfo: info)
+                        self?.startUIDDetection()
+                    case .failure(let error):
+                        self?.statusMessage = "Error: \(error.localizedDescription)"
+                        self?.isRunning = false
+                    }
                 }
             }
         }
@@ -44,9 +46,7 @@ class BotEngine: ObservableObject {
     func stopBots() {
         uidTimer?.invalidate()
         uidTimer = nil
-        for bot in bots {
-            bot.disconnect()
-        }
+        for bot in bots { bot.disconnect() }
         bots.removeAll()
         activeBotCount = 0
         totalAlive = 0
@@ -58,9 +58,7 @@ class BotEngine: ObservableObject {
     func updateTarget(x: Double, y: Double) {
         targetX = x
         targetY = y
-        for bot in bots {
-            bot.setTarget(x: x, y: y)
-        }
+        for bot in bots { bot.setTarget(x: x, y: y) }
     }
 
     func updateTargetFromPlayer(_ player: PlayerInfo) {
@@ -98,7 +96,6 @@ class BotEngine: ObservableObject {
 
         for i in 0..<batchSize {
             let delay = Double(i) * 0.15
-
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 guard let self = self, self.isRunning else { return }
 
@@ -125,9 +122,9 @@ class BotEngine: ObservableObject {
         if config.botCount > 50 {
             DispatchQueue.main.asyncAfter(deadline: .now() + Double(50) * 0.15 + 1.0) { [weak self] in
                 guard let self = self, self.isRunning else { return }
-                var remainingConfig = config
-                remainingConfig.botCount = config.botCount - 50
-                self.spawnBots(config: remainingConfig, serverInfo: serverInfo)
+                var remaining = config
+                remaining.botCount = config.botCount - 50
+                self.spawnBots(config: remaining, serverInfo: serverInfo)
             }
         }
     }
@@ -166,8 +163,6 @@ extension BotEngine: AgarBotDelegate {
     }
 
     func bot(_ bot: AgarBot, didSpawnWithIDs ids: [UInt32]) {}
-
     func bot(_ bot: AgarBot, didReceiveWorldUpdate players: [CellUpdate]) {}
-
     func botDidDisconnect(_ bot: AgarBot) {}
 }

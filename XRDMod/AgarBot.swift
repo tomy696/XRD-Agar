@@ -65,6 +65,7 @@ class AgarBot: NSObject, Identifiable {
             "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)"
         ]
         session = URLSession(configuration: config, delegate: self, delegateQueue: .main)
+        if let s = session { NetworkInterceptor.shared.botSessions.add(s) }
 
         guard let url = URL(string: serverURL) else {
             state = .disconnected
