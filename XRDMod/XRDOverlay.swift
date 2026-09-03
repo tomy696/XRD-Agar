@@ -8,7 +8,8 @@ class XRDOverlay: NSObject {
     let settings = GameSettings()
     let botEngine = BotEngine()
 
-    private var overlayWindow: XRDWindow?
+    private weak var gameWindow: UIWindow?
+    private var container: XRDPassthroughView?
     private var toggleBtn: ToggleButton?
     private var macroBtn: MacroButton?
     private var menuHosting: UIHostingController<AnyView>?
@@ -18,14 +19,17 @@ class XRDOverlay: NSObject {
     private var cancellables = Set<AnyCancellable>()
 
     func setup() {
-        guard UIApplication.shared.connectedScenes.first(where: { $0 is UIWindowScene }) != nil else {
+        guard let scene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene }).first,
+            let mainWindow = scene.windows.first else {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
                 self?.setup()
             }
             return
         }
 
-        createWindow()
+        gameWindow = mainWindow
+        installContainer()
         observeLifecycle()
         setupObservers()
 
@@ -34,6 +38,27 @@ class XRDOverlay: NSObject {
         } else {
             showLicenseView()
         }
+    }
+
+    private func installContainer() {
+        guard let window = gameWindow else { return }
+        container?.removeFromSuperview()
+        let c = XRDPassthroughView(frame: window.bounds)
+        c.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        window.addSubview(c)
+        container = c
+    }
+
+    private func ensureContainer() {
+        guard let window = gameWindow else { return }
+        if container == nil || container?.superview == nil {
+            installContainer()
+            if LicenseManager.shared.isValid {
+                addToggleButton()
+                if settings.isMacroEnabled { addMacroButton() }
+            }
+        }
+        if let c = container { window.bringSubviewToFront(c) }
     }
 
     // MARK: - Observers
@@ -72,55 +97,29 @@ class XRDOverlay: NSObject {
 
     @objc private func appActivated() {
         DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            if self.overlayWindow == nil || self.overlayWindow?.isHidden == true {
-                self.createWindow()
-            }
-            if self.toggleBtn == nil && LicenseManager.shared.isValid {
-                self.showOverlayUI()
-            }
-            self.overlayWindow?.isHidden = false
+            self?.ensureContainer()
         }
-    }
-
-    // MARK: - Window
-
-    private func createWindow() {
-        guard let scene = UIApplication.shared.connectedScenes
-            .compactMap({ $0 as? UIWindowScene }).first else { return }
-
-        let w = XRDWindow(windowScene: scene)
-        w.windowLevel = UIWindow.Level(rawValue: UIWindow.Level.normal.rawValue + 1)
-        w.backgroundColor = .clear
-        w.isUserInteractionEnabled = true
-        let vc = XRDRootVC()
-        w.rootViewController = vc
-        w.isHidden = false
-        overlayWindow = w
     }
 
     // MARK: - License
 
     private func showLicenseView() {
-        guard let rootVC = overlayWindow?.rootViewController else { return }
+        ensureContainer()
+        guard let c = container else { return }
         let view = LicenseView(licenseManager: LicenseManager.shared) { [weak self] in
             self?.hideLicenseView()
             self?.showOverlayUI()
         }
         let hosting = UIHostingController(rootView: AnyView(view))
         hosting.view.backgroundColor = UIColor.black.withAlphaComponent(0.9)
-        hosting.view.frame = rootVC.view.bounds
+        hosting.view.frame = c.bounds
         hosting.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        rootVC.addChild(hosting)
-        rootVC.view.addSubview(hosting.view)
-        hosting.didMove(toParent: rootVC)
+        c.addSubview(hosting.view)
         licenseHosting = hosting
     }
 
     private func hideLicenseView() {
-        licenseHosting?.willMove(toParent: nil)
         licenseHosting?.view.removeFromSuperview()
-        licenseHosting?.removeFromParent()
         licenseHosting = nil
     }
 
@@ -131,29 +130,31 @@ class XRDOverlay: NSObject {
     }
 
     private func addToggleButton() {
-        guard let rv = overlayWindow?.rootViewController?.view else { return }
+        ensureContainer()
+        guard let c = container else { return }
         toggleBtn?.removeFromSuperview()
 
-        let screenW = rv.bounds.width
+        let screenW = c.bounds.width
         let btn = ToggleButton(frame: CGRect(x: screenW - 52, y: 40, width: 40, height: 40))
         btn.autoresizingMask = [.flexibleLeftMargin]
         btn.onTap = { [weak self] in self?.toggleMenu() }
-        rv.addSubview(btn)
+        c.addSubview(btn)
         toggleBtn = btn
     }
 
     // MARK: - Macro Button
 
     private func addMacroButton() {
-        guard let rv = overlayWindow?.rootViewController?.view else { return }
+        ensureContainer()
+        guard let c = container else { return }
         macroBtn?.removeFromSuperview()
 
         let size = CGFloat(settings.macroButtonSize)
-        let btn = MacroButton(frame: CGRect(x: 50, y: rv.bounds.height - size - 50, width: size, height: size))
+        let btn = MacroButton(frame: CGRect(x: 50, y: c.bounds.height - size - 50, width: size, height: size))
         btn.autoresizingMask = [.flexibleTopMargin, .flexibleRightMargin]
         btn.onStart = { [weak self] in self?.startMacro() }
         btn.onStop = { [weak self] in self?.stopMacro() }
-        rv.addSubview(btn)
+        c.addSubview(btn)
         macroBtn = btn
     }
 
@@ -194,8 +195,8 @@ class XRDOverlay: NSObject {
     }
 
     private func showMenu() {
-        guard let rootVC = overlayWindow?.rootViewController else { return }
-        let rv = rootVC.view!
+        ensureContainer()
+        guard let c = container else { return }
 
         let menu = ModMenuView(settings: settings, botEngine: botEngine)
         let hosting = UIHostingController(rootView: AnyView(menu))
@@ -203,15 +204,13 @@ class XRDOverlay: NSObject {
 
         let menuW: CGFloat = 220
         let menuH: CGFloat = 310
-        let x = rv.bounds.width - menuW - 8
+        let x = c.bounds.width - menuW - 8
         let y: CGFloat = 85
         let finalFrame = CGRect(x: x, y: y, width: menuW, height: menuH)
         hosting.view.frame = finalFrame.offsetBy(dx: 0, dy: -12)
         hosting.view.alpha = 0
 
-        rootVC.addChild(hosting)
-        rv.addSubview(hosting.view)
-        hosting.didMove(toParent: rootVC)
+        c.addSubview(hosting.view)
 
         let pan = UIPanGestureRecognizer(target: self, action: #selector(dragMenu(_:)))
         hosting.view.addGestureRecognizer(pan)
@@ -230,9 +229,7 @@ class XRDOverlay: NSObject {
             hosting.view.alpha = 0
             hosting.view.frame = hosting.view.frame.offsetBy(dx: 0, dy: -10)
         }) { _ in
-            hosting.willMove(toParent: nil)
             hosting.view.removeFromSuperview()
-            hosting.removeFromParent()
         }
         menuHosting = nil
     }
@@ -245,7 +242,7 @@ class XRDOverlay: NSObject {
     }
 }
 
-// MARK: - Passthrough View (key fix for touch issues)
+// MARK: - Passthrough View
 
 class XRDPassthroughView: UIView {
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
@@ -263,27 +260,6 @@ class XRDPassthroughView: UIView {
         if result === self { return nil }
         return result
     }
-}
-
-// MARK: - Passthrough Window
-
-class XRDWindow: UIWindow {
-    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        let result = super.hitTest(point, with: event)
-        if result === self { return nil }
-        return result
-    }
-}
-
-// MARK: - Root VC
-
-class XRDRootVC: UIViewController {
-    override func loadView() {
-        view = XRDPassthroughView()
-        view.backgroundColor = .clear
-    }
-    override var shouldAutorotate: Bool { true }
-    override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .all }
 }
 
 // MARK: - Toggle Button (draggable + tappable)
