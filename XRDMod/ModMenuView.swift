@@ -18,7 +18,7 @@ struct ModMenuView: View {
             tabContent
             statusBar
         }
-        .frame(width: 220, height: 300)
+        .frame(width: 220, height: 310)
         .background(
             RoundedRectangle(cornerRadius: 12)
                 .fill(Color.black.opacity(0.92))
@@ -96,6 +96,7 @@ struct ModMenuView: View {
 
     private var controlsTab: some View {
         VStack(spacing: 8) {
+            // Zoom
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     Text("ZOOM")
@@ -111,6 +112,7 @@ struct ModMenuView: View {
             }
             .sectionStyle()
 
+            // Auto Feed
             Button(action: { settings.isAutoFeeding.toggle() }) {
                 HStack(spacing: 4) {
                     Image(systemName: settings.isAutoFeeding ? "pause.circle.fill" : "play.circle.fill")
@@ -125,20 +127,59 @@ struct ModMenuView: View {
                 .cornerRadius(8)
             }
 
-            HStack {
-                Circle()
-                    .fill(settings.isMacroActive ? Color.red : Color.gray.opacity(0.5))
-                    .frame(width: 6, height: 6)
-                Text("MACRO")
-                    .font(.system(size: 8, weight: .bold, design: .monospaced))
-                    .foregroundColor(.gray)
-                Spacer()
-                Text(settings.isMacroActive ? "ACTIVE" : "HOLD W BTN")
-                    .font(.system(size: 8, design: .monospaced))
-                    .foregroundColor(settings.isMacroActive ? .red : .gray)
+            // Macro
+            VStack(alignment: .leading, spacing: 5) {
+                HStack {
+                    Text("MACRO")
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .foregroundColor(xrdCyan)
+                    Spacer()
+                    Toggle("", isOn: $settings.isMacroEnabled)
+                        .tint(xrdPurple)
+                        .labelsHidden()
+                        .scaleEffect(0.7)
+                }
+
+                if settings.isMacroEnabled {
+                    HStack(spacing: 6) {
+                        Text("SIZE")
+                            .font(.system(size: 7, weight: .bold, design: .monospaced))
+                            .foregroundColor(.gray)
+                        Button(action: { settings.macroButtonSize = max(30, settings.macroButtonSize - 5) }) {
+                            Text("-")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(.white)
+                                .frame(width: 22, height: 22)
+                                .background(Color.white.opacity(0.1))
+                                .cornerRadius(4)
+                        }
+                        Text("\(Int(settings.macroButtonSize))")
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            .foregroundColor(.white)
+                            .frame(width: 26)
+                        Button(action: { settings.macroButtonSize = min(100, settings.macroButtonSize + 5) }) {
+                            Text("+")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(.white)
+                                .frame(width: 22, height: 22)
+                                .background(Color.white.opacity(0.1))
+                                .cornerRadius(4)
+                        }
+                        Spacer()
+                        if settings.isMacroActive {
+                            Circle()
+                                .fill(Color.red)
+                                .frame(width: 6, height: 6)
+                            Text("ON")
+                                .font(.system(size: 7, weight: .black, design: .monospaced))
+                                .foregroundColor(.red)
+                        }
+                    }
+                }
             }
             .sectionStyle()
 
+            // Info
             VStack(alignment: .leading, spacing: 3) {
                 infoRow("MASS", "\(settings.ownMass)")
                 infoRow("SERVER", serverDisplayName)
