@@ -14,8 +14,8 @@ targets:
         excludes:
           - "inject.js"
           - "Info.plist"
-    resources:
       - path: XRDMod/inject.js
+        buildPhase: resources
     settings:
       base:
         INFOPLIST_FILE: XRDMod/Info.plist

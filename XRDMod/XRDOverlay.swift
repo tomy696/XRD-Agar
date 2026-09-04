@@ -47,7 +47,6 @@ class XRDOverlay: NSObject {
             self.jsBridge.setup(in: mainWindow)
             self.zoomEngine.jsBridge = self.jsBridge
             self.zoomEngine.setup(window: mainWindow)
-            self.zoomEngine.debugInfo = self.jsBridge.statusInfo
 
             self.jsBridge.onConnected = { [weak self] in
                 guard let self = self else { return }
@@ -56,6 +55,8 @@ class XRDOverlay: NSObject {
                     self.jsBridge.setFeedInterval(ms)
                 }
             }
+
+            self.readGameConfig()
         }
 
         if LicenseManager.shared.isValid {
@@ -292,9 +293,81 @@ class XRDOverlay: NSObject {
         g.setTranslation(.zero, in: v.superview)
     }
 
+    private(set) var gameConfigData: [String: String] = [:]
+
+    private func readGameConfig() {
+        let bundle = Bundle.main
+
+        if let url = bundle.url(forResource: "GameConfiguration", withExtension: "json"),
+           let data = try? Data(contentsOf: url),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            extractServerURLs(from: json, prefix: "GameConfig")
+        }
+
+        if let url = bundle.url(forResource: "GameConfiguration", withExtension: "plist"),
+           let dict = NSDictionary(contentsOf: url) as? [String: Any] {
+            extractServerURLs(from: dict, prefix: "GamePlist")
+        }
+
+        if let url = bundle.url(forResource: "EnvironmentsConfiguration", withExtension: "plist"),
+           let dict = NSDictionary(contentsOf: url) as? [String: Any] {
+            extractServerURLs(from: dict, prefix: "Env")
+        }
+
+        for name in ["Slice_External - Service Keys",
+                     "Slice_Default Settings - Regions",
+                     "Slice_Default Settings - Gameplay"] {
+            if let url = bundle.url(forResource: name, withExtension: "plist"),
+               let dict = NSDictionary(contentsOf: url) as? [String: Any] {
+                let short = name.replacingOccurrences(of: "Slice_", with: "").prefix(20)
+                extractServerURLs(from: dict, prefix: String(short))
+            }
+        }
+
+        if let url = bundle.url(forResource: "agario", withExtension: "xcconfig"),
+           let content = try? String(contentsOf: url) {
+            gameConfigData["xcconfig"] = String(content.prefix(500))
+        }
+    }
+
+    private func extractServerURLs(from dict: [String: Any], prefix: String) {
+        func scan(_ obj: Any, path: String) {
+            if let s = obj as? String {
+                let sl = s.lowercased()
+                if sl.contains("http") || sl.contains("ws:") || sl.contains("wss:") ||
+                   sl.contains("agar") || sl.contains("miniclip") || sl.contains("server") ||
+                   sl.contains("endpoint") || sl.contains("api") || sl.contains("arena") ||
+                   sl.contains("tech.") || sl.contains("socket") || sl.contains("gateway") {
+                    gameConfigData["\(prefix).\(path)"] = String(s.prefix(200))
+                }
+            } else if let d = obj as? [String: Any] {
+                for (k, v) in d {
+                    let kl = k.lowercased()
+                    if kl.contains("url") || kl.contains("server") || kl.contains("host") ||
+                       kl.contains("endpoint") || kl.contains("api") || kl.contains("socket") ||
+                       kl.contains("arena") || kl.contains("gateway") || kl.contains("region") ||
+                       kl.contains("address") || kl.contains("domain") || kl.contains("env") ||
+                       kl.contains("base") || kl.contains("config") || kl.contains("network") {
+                        if let sv = v as? String {
+                            gameConfigData["\(prefix).\(path).\(k)"] = String(sv.prefix(200))
+                        } else {
+                            scan(v, path: "\(path).\(k)")
+                        }
+                    }
+                    if let sv = v as? String, sv.contains("://") {
+                        gameConfigData["\(prefix).\(path).\(k)"] = String(sv.prefix(200))
+                    }
+                }
+            } else if let arr = obj as? [Any] {
+                for (i, v) in arr.prefix(10).enumerated() { scan(v, path: "\(path)[\(i)]") }
+            }
+        }
+        scan(dict, path: "")
+    }
+
     func debugDump() -> String {
         var L: [String] = []
-        L.append("=== XRD DUMP v7 ===")
+        L.append("=== XRD DUMP v8 ===")
 
         L.append("")
         L.append("-- APP --")
@@ -347,6 +420,13 @@ class XRDOverlay: NSObject {
             L.append("Frame: \(gv.frame)")
         } else {
             L.append("Not found")
+        }
+
+        L.append("")
+        L.append("-- GAME CONFIG --")
+        if gameConfigData.isEmpty { L.append("(none extracted)") }
+        for (k, v) in gameConfigData.sorted(by: { $0.key < $1.key }) {
+            L.append("  \(k) = \(v)")
         }
 
         L.append("")
@@ -480,17 +560,25 @@ class ZoomEngine: NSObject, ObservableObject {
             isNativeGame = nativeHints.contains(where: { viewName.localizedCaseInsensitiveContains($0) })
         }
 
-        _ = tryCppHooks()
-        _ = tryObjCHooks()
-
-        activeMethod = .displayZoom
-        statusText = "Display zoom (\(debugInfo))"
+        if tryCppHooks() {
+            activeMethod = .engineHook
+            statusText = "C++ zoom (\(debugInfo))"
+        } else if tryObjCHooks() {
+            activeMethod = .objcHook
+            statusText = "ObjC zoom (\(debugInfo))"
+        } else {
+            activeMethod = .displayZoom
+            statusText = "Display zoom (\(debugInfo))"
+        }
     }
 
     func setZoom(_ factor: CGFloat) {
         currentZoom = factor
-        engineSetScale?(Float(factor))
-        applyDisplayZoom(factor)
+        if let hook = engineSetScale {
+            hook(Float(factor))
+        } else {
+            applyDisplayZoom(factor)
+        }
     }
 
     func reset() { setZoom(1.0) }
