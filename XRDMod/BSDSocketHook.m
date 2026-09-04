@@ -23,15 +23,18 @@ static NSMutableArray<NSString *> *g_dns;
 static NSMutableDictionary<NSString *, NSString *> *g_dnsMap;
 static BOOL g_ready = NO;
 
+static NSMutableArray<NSString *> *g_candidates;
 static NSString * const kNotif = @"XRDBSDConnection";
 static NSString * const kConnsKey = @"XRD_bsdConns";
 static NSString * const kDNSKey = @"XRD_bsdDNS";
+static NSString * const kCandidatesKey = @"XRD_bsdCandidates";
 
 __attribute__((constructor))
 static void bsd_hook_init(void) {
     g_conns = [NSMutableArray new];
     g_dns = [NSMutableArray new];
     g_dnsMap = [NSMutableDictionary new];
+    g_candidates = [NSMutableArray new];
     g_ready = YES;
 }
 
@@ -70,22 +73,66 @@ int xrd_connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
                 if (g_conns.count >= 200) [g_conns removeObjectAtIndex:0];
                 [g_conns addObject:entry];
 
-                BOOL isGame = NO;
+                BOOL isConfirmedGame = NO;
+                BOOL isAd = NO;
+
                 if (hostname) {
                     NSString *h = [hostname lowercaseString];
-                    isGame = [h containsString:@"agar"] ||
-                             [h containsString:@"arena"] ||
-                             [h containsString:@"miniclip"] ||
-                             [h containsString:@"live-"];
+                    isConfirmedGame = [h containsString:@"agar"] ||
+                                     [h containsString:@"arena"] ||
+                                     [h containsString:@"miniclip"] ||
+                                     [h containsString:@"live-"];
+                    isAd = [h containsString:@"rayjump"] ||
+                           [h containsString:@"mintegral"] ||
+                           [h containsString:@"applovin"] ||
+                           [h containsString:@"vungle"] ||
+                           [h containsString:@"unity3d"] ||
+                           [h containsString:@"google"] ||
+                           [h containsString:@"facebook"] ||
+                           [h containsString:@"doubleclick"] ||
+                           [h containsString:@"appsflyer"] ||
+                           [h containsString:@"adjust"] ||
+                           [h containsString:@"inmobi"] ||
+                           [h containsString:@"moloco"] ||
+                           [h containsString:@"tapjoy"] ||
+                           [h containsString:@"chartboost"] ||
+                           [h containsString:@"apple.com"] ||
+                           [h containsString:@"icloud"] ||
+                           [h containsString:@"amazon-adsystem"] ||
+                           [h containsString:@"fyber"] ||
+                           [h containsString:@"datadog"] ||
+                           [h containsString:@"ironsrc"];
                 }
 
-                if (isGame) {
+                // Clean IPv6-mapped prefix for URL construction
+                NSString *cleanIP = ipStr;
+                if ([ipStr hasPrefix:@"::ffff:"]) {
+                    cleanIP = [ipStr substringFromIndex:7];
+                }
+
+                if (isConfirmedGame) {
                     NSString *wsURL = [NSString stringWithFormat:@"wss://%@:%d", hostname, port];
                     [[NSUserDefaults standardUserDefaults] setObject:wsURL forKey:@"XRD_bsdServer"];
                     [[NSNotificationCenter defaultCenter]
                         postNotificationName:kNotif object:nil
-                        userInfo:@{@"url": wsURL, @"ip": ipStr,
+                        userInfo:@{@"url": wsURL, @"ip": cleanIP,
                                    @"port": @(port), @"host": hostname}];
+                } else if (!isAd && !hostname) {
+                    // Direct IP connection (no DNS) = game server candidate
+                    NSString *candidate = [NSString stringWithFormat:@"%@:%d", cleanIP, port];
+                    if (g_candidates.count >= 50) [g_candidates removeObjectAtIndex:0];
+                    [g_candidates addObject:candidate];
+                    [[NSUserDefaults standardUserDefaults] setObject:[g_candidates copy] forKey:kCandidatesKey];
+
+                    // Auto-promote: if no confirmed server yet, use first candidate
+                    if (![[NSUserDefaults standardUserDefaults] stringForKey:@"XRD_bsdServer"]) {
+                        NSString *wsURL = [NSString stringWithFormat:@"wss://%@:%d", cleanIP, port];
+                        [[NSUserDefaults standardUserDefaults] setObject:wsURL forKey:@"XRD_bsdServer"];
+                        [[NSNotificationCenter defaultCenter]
+                            postNotificationName:kNotif object:nil
+                            userInfo:@{@"url": wsURL, @"ip": cleanIP,
+                                       @"port": @(port), @"host": @"(direct-ip)"}];
+                    }
                 }
 
                 if (g_conns.count % 5 == 0) {
@@ -150,6 +197,7 @@ DYLD_INTERPOSE(xrd_getaddrinfo, getaddrinfo)
 @interface XRDBSDHook : NSObject
 + (NSArray<NSString *> *)capturedConnections;
 + (NSArray<NSString *> *)capturedDNS;
++ (NSArray<NSString *> *)capturedCandidates;
 + (void)syncToDefaults;
 @end
 
@@ -163,9 +211,14 @@ DYLD_INTERPOSE(xrd_getaddrinfo, getaddrinfo)
     return [g_dns copy] ?: @[];
 }
 
++ (NSArray<NSString *> *)capturedCandidates {
+    return [g_candidates copy] ?: @[];
+}
+
 + (void)syncToDefaults {
     [[NSUserDefaults standardUserDefaults] setObject:[g_conns copy] forKey:kConnsKey];
     [[NSUserDefaults standardUserDefaults] setObject:[g_dns copy] forKey:kDNSKey];
+    [[NSUserDefaults standardUserDefaults] setObject:[g_candidates copy] forKey:kCandidatesKey];
 }
 
 @end

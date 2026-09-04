@@ -345,24 +345,42 @@ class XRDOverlay: NSObject {
         }
     }
 
+    private func isServerRelated(_ key: String) -> Bool {
+        let kl = key.lowercased()
+        return kl.contains("region") || kl.contains("domain") || kl.contains("server") ||
+               kl.contains("url") || kl.contains("host") || kl.contains("endpoint") ||
+               kl.contains("api") || kl.contains("comm") || kl.contains("network") ||
+               kl.contains("websocket") || kl.contains("socket") || kl.contains("service key")
+    }
+
     private func dumpAllKeys(from dict: [String: Any], prefix: String, depth: Int = 0) {
-        guard depth < 3 else { return }
+        let maxDepth = isServerRelated(prefix) ? 6 : 3
+        guard depth < maxDepth else { return }
+        let skipFrameData = !isServerRelated(prefix)
         for (k, v) in dict.sorted(by: { $0.key < $1.key }) {
+            if skipFrameData && depth >= 2 {
+                let kl = k.lowercased()
+                if kl.contains("frame") || kl.contains("sprite") || kl.contains("texture") ||
+                   kl.contains("animation") || kl.contains("atlas") { continue }
+            }
             let key = "\(prefix).\(k)"
             if let s = v as? String {
-                gameConfigData[key] = String(s.prefix(120))
+                gameConfigData[key] = String(s.prefix(200))
             } else if let n = v as? NSNumber {
                 gameConfigData[key] = n.stringValue
             } else if let d = v as? [String: Any] {
                 gameConfigData[key] = "{dict:\(d.count)}"
                 dumpAllKeys(from: d, prefix: key, depth: depth + 1)
             } else if let a = v as? [Any] {
+                let limit = isServerRelated(key) ? 20 : 5
                 gameConfigData[key] = "[arr:\(a.count)]"
-                for (i, item) in a.prefix(5).enumerated() {
+                for (i, item) in a.prefix(limit).enumerated() {
                     if let s = item as? String {
-                        gameConfigData["\(key)[\(i)]"] = String(s.prefix(120))
+                        gameConfigData["\(key)[\(i)]"] = String(s.prefix(200))
                     } else if let d = item as? [String: Any] {
                         dumpAllKeys(from: d, prefix: "\(key)[\(i)]", depth: depth + 1)
+                    } else if let n = item as? NSNumber {
+                        gameConfigData["\(key)[\(i)]"] = n.stringValue
                     }
                 }
             } else {
@@ -373,7 +391,7 @@ class XRDOverlay: NSObject {
 
     func debugDump() -> String {
         var L: [String] = []
-        L.append("=== XRD DUMP v9 ===")
+        L.append("=== XRD DUMP v10 ===")
 
         L.append("")
         L.append("-- APP --")
@@ -421,7 +439,10 @@ class XRDOverlay: NSObject {
         let bsdConns = UserDefaults.standard.stringArray(forKey: "XRD_bsdConns") ?? []
         let bsdDNS = UserDefaults.standard.stringArray(forKey: "XRD_bsdDNS") ?? []
         let bsdServer = UserDefaults.standard.string(forKey: "XRD_bsdServer")
+        let bsdCandidates = UserDefaults.standard.stringArray(forKey: "XRD_bsdCandidates") ?? []
         L.append("BSD.server: \(bsdServer ?? "none")")
+        L.append("BSD.candidates(\(bsdCandidates.count)):")
+        for c in bsdCandidates.suffix(20) { L.append("  \(c)") }
         L.append("BSD.dns(\(bsdDNS.count)):")
         for d in bsdDNS.suffix(30) { L.append("  \(d)") }
         L.append("BSD.conns(\(bsdConns.count)):")
