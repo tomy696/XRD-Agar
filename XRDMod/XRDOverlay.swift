@@ -294,304 +294,164 @@ class XRDOverlay: NSObject {
 
     func debugDump() -> String {
         var L: [String] = []
-        L.append("=== XRD FULL DUMP v4 ===")
+        L.append("=== XRD DUMP v5 ===")
 
-        // ---- APP ----
         L.append("")
         L.append("-- APP --")
         let info = Bundle.main.infoDictionary ?? [:]
         L.append("Bundle: \(info["CFBundleIdentifier"] ?? "?")")
         L.append("Name: \(info["CFBundleDisplayName"] ?? info["CFBundleName"] ?? "?")")
         L.append("Version: \(info["CFBundleShortVersionString"] ?? "?") (\(info["CFBundleVersion"] ?? "?"))")
-        L.append("Exec: \(info["CFBundleExecutable"] ?? "?")")
 
-        // ---- DEVICE ----
         L.append("")
         L.append("-- DEVICE --")
         let screen = UIScreen.main
         L.append("Screen: \(Int(screen.bounds.width))x\(Int(screen.bounds.height)) scale=\(screen.scale)")
-        L.append("NativeScale: \(screen.nativeScale)")
-        L.append("NativeBounds: \(Int(screen.nativeBounds.width))x\(Int(screen.nativeBounds.height))")
-        let orient = UIApplication.shared.connectedScenes
-            .compactMap { ($0 as? UIWindowScene)?.interfaceOrientation }
-            .first
-        L.append("Orientation: \(orient.map { "\($0.rawValue)" } ?? "?")")
         L.append("iOS: \(UIDevice.current.systemVersion)")
-        L.append("Model: \(UIDevice.current.model)")
 
-        // ---- XRD STATE ----
         L.append("")
         L.append("-- XRD STATE --")
-        L.append("Zoom.method: \(zoomEngine.activeMethod.rawValue)")
+        L.append("Zoom: \(zoomEngine.activeMethod.rawValue) current=\(zoomEngine.currentZoom) native=\(zoomEngine.isNativeGame)")
         L.append("Zoom.status: \(zoomEngine.statusText)")
         L.append("Zoom.debug: \(zoomEngine.debugInfo)")
-        L.append("Zoom.current: \(zoomEngine.currentZoom)")
-        L.append("Zoom.native: \(zoomEngine.isNativeGame)")
-        L.append("JS.connected: \(jsBridge.isConnected)")
-        L.append("JS.status: \(jsBridge.statusInfo)")
+        L.append("JS: connected=\(jsBridge.isConnected) status=\(jsBridge.statusInfo)")
         let ni = NetworkInterceptor.shared
         L.append("Net.server: \(ni.bestServerURL ?? "none")")
         L.append("Net.captured: \(ni.capturedServerURL ?? "none")")
         L.append("Net.manual: \(ni.manualServerURL ?? "none")")
         L.append("Net.saved: \(ni.savedServerURL ?? "none")")
         L.append("Net.hasServer: \(ni.hasServer)")
-        L.append("Net.gameWS: \(ni.gameWebSocket != nil ? "obj" : "nil") state=\(ni.gameWebSocket.map { "\($0.state.rawValue)" } ?? "nil")")
         L.append("Net.intercepted: \(ni.interceptedCount)")
         L.append("Net.apiEndpoint: \(ni.discoveredAPIEndpoint ?? "none")")
-        L.append("Net.headers: \(ni.discoveredHeaders?.description ?? "none")")
-        L.append("Bots.running: \(botEngine.isRunning)")
-        L.append("Bots.alive: \(botEngine.totalAlive)")
-        L.append("Bots.status: \(botEngine.statusMessage)")
-        L.append("Macro.on: \(settings.isMacroEnabled)")
-        L.append("Macro.power: \(settings.macroPower)")
-        L.append("Macro.interval: \(settings.feedInterval)")
-        L.append("Players: \(settings.currentPlayers.count)")
-        L.append("OwnCells: \(settings.ownCellIDs)")
+        L.append("Bots: running=\(botEngine.isRunning) alive=\(botEngine.totalAlive)")
+        L.append("Macro: on=\(settings.isMacroEnabled) power=\(settings.macroPower)")
+        L.append("Players: \(settings.currentPlayers.count) OwnCells: \(settings.ownCellIDs.count)")
 
-        // ---- WINDOWS + VIEWS ----
         L.append("")
         L.append("-- WINDOWS --")
         for scene in UIApplication.shared.connectedScenes {
             guard let ws = scene as? UIWindowScene else { continue }
-            L.append("Scene: \(type(of: ws)) state=\(ws.activationState.rawValue)")
             for (wi, window) in ws.windows.enumerated() {
-                let wType = String(describing: type(of: window))
                 let rc = window.rootViewController.map { String(describing: type(of: $0)) } ?? "nil"
-                L.append("Win[\(wi)]: \(wType) \(Int(window.frame.width))x\(Int(window.frame.height)) key=\(window.isKeyWindow) root=\(rc)")
-                dumpViewTree(window, indent: 1, lines: &L, depth: 0, maxDepth: 8)
+                L.append("W[\(wi)]: \(type(of: window)) \(Int(window.frame.width))x\(Int(window.frame.height)) root=\(rc)")
+                dumpViewTree(window, indent: 1, lines: &L, depth: 0, maxDepth: 6)
             }
         }
 
-        // ---- WKWEBVIEWS ----
-        L.append("")
-        L.append("-- WKWEBVIEWS --")
-        var wkCount = 0
-        for scene in UIApplication.shared.connectedScenes {
-            guard let ws = scene as? UIWindowScene else { continue }
-            for window in ws.windows {
-                findAllWKWebViews(in: window) { wv, path in
-                    wkCount += 1
-                    let url = wv.url?.absoluteString ?? "nil"
-                    let title = wv.title ?? ""
-                    L.append("WK[\(wkCount)]: \(Int(wv.frame.width))x\(Int(wv.frame.height)) hidden=\(wv.isHidden) loading=\(wv.isLoading)")
-                    L.append("  url: \(url)")
-                    if !title.isEmpty { L.append("  title: \(title)") }
-                    L.append("  path: \(path)")
-                    L.append("  canGoBack: \(wv.canGoBack) canGoForward: \(wv.canGoForward)")
-                    let cfg = wv.configuration
-                    L.append("  userScripts: \(cfg.userContentController.userScripts.count)")
-                    for (si, script) in cfg.userContentController.userScripts.enumerated() {
-                        let src = script.source
-                        let preview = String(src.prefix(80)).replacingOccurrences(of: "\n", with: "\\n")
-                        L.append("  script[\(si)]: time=\(script.injectionTime.rawValue) mainOnly=\(script.isForMainFrameOnly) len=\(src.count) preview=\(preview)")
-                    }
-                }
-            }
-        }
-        if wkCount == 0 { L.append("None found") }
-
-        // ---- GAME VIEW ----
         L.append("")
         L.append("-- GAME VIEW --")
         if let gv = zoomEngine.gameViewForDump {
-            let name = String(describing: type(of: gv))
-            L.append("Class: \(name)")
-            L.append("Frame: \(gv.frame)")
-            L.append("Bounds: \(gv.bounds)")
-            L.append("Transform: \(gv.transform)")
-            L.append("ContentScale: \(gv.contentScaleFactor)")
+            L.append("Class: \(type(of: gv))")
+            L.append("Frame: \(gv.frame) Scale: \(gv.contentScaleFactor)")
             L.append("Layer: \(type(of: gv.layer))")
-            L.append("LayerOpaque: \(gv.layer.isOpaque)")
-            let gestures = gv.gestureRecognizers ?? []
-            L.append("Gestures(\(gestures.count)):")
-            for g in gestures {
-                L.append("  \(type(of: g)) enabled=\(g.isEnabled) state=\(g.state.rawValue)")
-            }
         } else {
             L.append("Not found")
         }
 
-        // ---- OBJ-C CLASSES ----
         L.append("")
         L.append("-- OBJC CLASSES --")
-        let knownCandidates = ["CCDirector", "CCEAGLView", "CCMetalView", "CCGLView",
-                               "CCGLView_MCPlatform", "Director", "EAGLView", "MetalView",
-                               "GLView", "CCDirectorCaller", "AppController",
-                               "RootViewController", "MTKView", "GLKView",
-                               "WKWebView", "UIWebView", "WKContentView",
-                               "CCScheduler", "CCActionManager", "CCTextureCache",
-                               "CCApplication", "CCScene", "CCLayer", "CCNode",
-                               "CCSprite", "CCLabelTTF", "CCLabelBMFont",
-                               "CCMenu", "CCMenuItem", "CCParticleSystem"]
-        let foundClasses = knownCandidates.filter { NSClassFromString($0) != nil }
-        L.append("Known: \(foundClasses.joined(separator: ", "))")
+        let candidates = ["CCDirector", "CCEAGLView", "CCMetalView", "CCGLView",
+                          "CCGLView_MCPlatform", "Director", "EAGLView", "MetalView",
+                          "GLView", "CCDirectorCaller", "AppController",
+                          "RootViewController", "MTKView", "GLKView",
+                          "CCScheduler", "CCActionManager", "CCTextureCache",
+                          "CCApplication", "CCScene", "CCLayer", "CCNode",
+                          "CCSprite", "CCLabelTTF", "CCMenu", "CCParticleSystem"]
+        let found = candidates.filter { NSClassFromString($0) != nil }
+        L.append("Found: \(found.joined(separator: ", "))")
 
-        // ---- ALL GAME CLASSES ----
         L.append("")
         L.append("-- GAME CLASSES --")
         var allClassCount: UInt32 = 0
         var gameClasses: [String] = []
         if let classList = objc_copyClassList(&allClassCount) {
-            let systemPrefixes = ["UI", "NS", "CA", "CG", "CF", "CK", "WK", "MK", "AV",
-                                  "SK", "SC", "CL", "CT", "CM", "CN", "CS", "AB", "AL",
-                                  "AU", "AS", "AT", "BA", "BS", "CB", "CI", "CR", "DC",
-                                  "EA", "EK", "GC", "GK", "GL", "HK", "HM", "IN", "IO",
-                                  "LA", "MC", "MD", "MF", "ML", "MP", "MT", "NC", "NE",
-                                  "NW", "OS", "PH", "PK", "QL", "RM", "SA", "SF", "SL",
-                                  "SR", "SS", "ST", "TN", "TT", "UM", "UN", "VS", "VN",
-                                  "WC", "XC", "_", "Web", "DOM", "NSCF", "NSUI", "__NS",
-                                  "__CF", "Swift.", "swift.", "Swif", "objc", "dispatch",
-                                  "Block", "Mach", "Protocol", "Object", "JSExport"]
+            let sysPfx = ["UI", "NS", "CA", "CG", "CF", "CK", "WK", "MK", "AV",
+                          "SK", "SC", "CL", "CT", "CM", "CN", "CS", "AB", "AL",
+                          "AU", "AS", "AT", "BA", "BS", "CB", "CI", "CR", "DC",
+                          "EA", "EK", "GC", "GK", "GL", "HK", "HM", "IN", "IO",
+                          "LA", "MC", "MD", "MF", "ML", "MP", "MT", "NC", "NE",
+                          "NW", "OS", "PH", "PK", "QL", "RM", "SA", "SF", "SL",
+                          "SR", "SS", "ST", "TN", "TT", "UM", "UN", "VS", "VN",
+                          "WC", "XC", "_", "Web", "DOM", "NSCF", "NSUI", "__NS",
+                          "__CF", "Swi", "objc", "dis", "Blo", "Mac", "Pro", "Obj", "JSE"]
             for i in 0..<Int(allClassCount) {
                 let name = String(cString: class_getName(classList[i]))
                 if name.count < 2 { continue }
-                let isSystem = systemPrefixes.contains(where: { name.hasPrefix($0) })
-                if !isSystem && !name.contains(".") {
-                    gameClasses.append(name)
-                }
+                let isSys = sysPfx.contains(where: { name.hasPrefix($0) })
+                if !isSys && !name.contains(".") { gameClasses.append(name) }
             }
             free(UnsafeMutableRawPointer(classList))
         }
         gameClasses.sort()
-        L.append("Total ObjC: \(allClassCount), Game-like: \(gameClasses.count)")
-        for gc in gameClasses {
-            L.append("  \(gc)")
-        }
+        L.append("Total: \(allClassCount), Game: \(gameClasses.count)")
+        for gc in gameClasses { L.append("  \(gc)") }
 
-        // ---- COCOS2D DEEP INTROSPECTION ----
         L.append("")
-        L.append("-- COCOS2D DEEP --")
-        dumpCocos2DFull(&L)
+        L.append("-- CLASS METHODS --")
+        dumpClassMetadata(&L)
 
-        // ---- LOADED FRAMEWORKS ----
         L.append("")
         L.append("-- FRAMEWORKS --")
-        let imageCount = _dyld_image_count()
-        var gameFrameworks: [String] = []
-        for i in 0..<imageCount {
-            guard let name = _dyld_get_image_name(i) else { continue }
-            let path = String(cString: name)
-            let isSystem = path.hasPrefix("/usr/") || path.hasPrefix("/System/") ||
-                           path.hasPrefix("/Developer/")
-            if !isSystem {
-                gameFrameworks.append(path)
+        let imgCount = _dyld_image_count()
+        for i in 0..<imgCount {
+            guard let n = _dyld_get_image_name(i) else { continue }
+            let p = String(cString: n)
+            if !p.hasPrefix("/usr/") && !p.hasPrefix("/System/") && !p.hasPrefix("/Developer/") {
+                L.append("  \(p)")
             }
         }
-        L.append("Non-system(\(gameFrameworks.count)):")
-        for fw in gameFrameworks { L.append("  \(fw)") }
 
-        // ---- DLSYM PROBES ----
         L.append("")
         L.append("-- DLSYM --")
-        if let handle = dlopen(nil, RTLD_NOW) {
-            let symbols = [
+        if let h = dlopen(nil, RTLD_NOW) {
+            let syms = [
+                "glViewport", "glOrtho", "glFrustum", "glScalef",
+                "glMatrixMode", "glLoadIdentity",
                 "_ZN7cocos2d8Director11getInstanceEv",
                 "_ZN7cocos2d8Director14sharedDirectorEv",
                 "_ZN7cocos2d4Node8setScaleEf",
-                "_ZN7cocos2d5Scene8setScaleEf",
+                "_ZNK7cocos2d8Director15getRunningSceneEv",
                 "_ZN7cocos2d6Camera9setZoomXYEff",
                 "_ZN7cocos2d6Camera6setFOVEf",
-                "_ZN7cocos2d6Camera11setPositionEf",
-                "_ZN7cocos2d6Camera14setEyeXYZEfff",
-                "_ZNK7cocos2d8Director15getRunningSceneEv",
-                "_ZN7cocos2d8Director13setProjectionENS0_10ProjectionE",
-                "_ZNK7cocos2d8Director10getWinSizeEv",
-                "_ZN7cocos2d8Director20setDesignResolutionEffi",
                 "_ZN2cc8Director11getInstanceEv",
                 "_ZN2cc4Node8setScaleEf",
-                "_ZN2ax8Director11getInstanceEv",
-                "_ZN2ax4Node8setScaleEf",
-                "glViewport", "glOrtho", "glFrustum", "glScalef",
-                "glMatrixMode", "glLoadIdentity", "glPushMatrix", "glPopMatrix"
+                "_ZN2ax8Director11getInstanceEv"
             ]
-            var anyFound = false
-            for s in symbols {
-                if dlsym(handle, s) != nil {
-                    L.append("  \(s) ✓")
-                    anyFound = true
-                }
+            var any = false
+            for s in syms {
+                if dlsym(h, s) != nil { L.append("  \(s) ✓"); any = true }
             }
-            if !anyFound { L.append("  (none found)") }
-
-            let namespaces = ["7cocos2d", "2cc", "2ax", "5cocos"]
-            for ns in namespaces {
-                let probes = [
-                    "_ZN\(ns)8Director11getInstanceEv",
-                    "_ZN\(ns)8Director14sharedDirectorEv",
-                    "_ZN\(ns)4Node8setScaleEf",
-                    "_ZNK\(ns)8Director15getRunningSceneEv",
-                    "_ZN\(ns)6Camera9setZoomXYEff",
-                    "_ZN\(ns)6Camera6setFOVEf",
-                    "_ZN\(ns)6Camera6createEv",
-                    "_ZN\(ns)4Node12getChildrenEv",
-                    "_ZN\(ns)4Node12setPositionEff",
-                    "_ZN\(ns)4Node11getPositionEv",
-                    "_ZN\(ns)4Node14setAnchorPointERKNS_4Vec2E",
-                    "_ZN\(ns)4Node14setContentSizeERKNS_4SizeE"
-                ]
-                let foundInNs = probes.filter { dlsym(handle, $0) != nil }
-                if !foundInNs.isEmpty {
-                    L.append("  ns=\(ns):")
-                    for f in foundInNs { L.append("    \(f) ✓") }
-                }
-            }
+            if !any { L.append("  (none)") }
         }
 
-        // ---- USERDEFAULTS (XRD) ----
-        L.append("")
-        L.append("-- USERDEFAULTS --")
-        let allKeys = UserDefaults.standard.dictionaryRepresentation().keys
-            .filter { $0.hasPrefix("XRD_") || $0.lowercased().contains("agar") || $0.lowercased().contains("server") }
-            .sorted()
-        for k in allKeys {
-            let val = UserDefaults.standard.object(forKey: k)
-            L.append("  \(k) = \(val ?? "nil")")
-        }
-        if allKeys.isEmpty { L.append("  (none)") }
-
-        // ---- BUNDLE RESOURCES ----
         L.append("")
         L.append("-- RESOURCES --")
-        if let resourcePath = Bundle.main.resourcePath {
-            let fm = FileManager.default
-            if let contents = try? fm.contentsOfDirectory(atPath: resourcePath) {
-                let interesting = contents.filter { f in
-                    let fl = f.lowercased()
-                    return fl.hasSuffix(".js") || fl.hasSuffix(".html") || fl.hasSuffix(".json") ||
-                           fl.hasSuffix(".plist") || fl.hasSuffix(".framework") ||
-                           fl.hasSuffix(".dylib") || fl.hasSuffix(".bundle") ||
-                           fl.hasSuffix(".wasm") || fl.hasSuffix(".dat") ||
-                           fl.contains("agar") || fl.contains("game") || fl.contains("config") ||
-                           fl.contains("server") || fl.contains("socket") || fl.contains("cocos")
-                }.sorted()
-                L.append("Interesting(\(interesting.count)):")
-                for f in interesting { L.append("  \(f)") }
-            }
-            if let frameworks = Bundle.main.privateFrameworksPath,
-               let fwList = try? fm.contentsOfDirectory(atPath: frameworks) {
-                L.append("PrivateFrameworks:")
-                for f in fwList.sorted() { L.append("  \(f)") }
-            }
+        if let rp = Bundle.main.resourcePath,
+           let contents = try? FileManager.default.contentsOfDirectory(atPath: rp) {
+            let interesting = contents.filter { f in
+                let fl = f.lowercased()
+                return fl.hasSuffix(".js") || fl.hasSuffix(".html") || fl.hasSuffix(".json") ||
+                       fl.hasSuffix(".plist") || fl.hasSuffix(".framework") ||
+                       fl.hasSuffix(".dylib") || fl.hasSuffix(".bundle") ||
+                       fl.contains("agar") || fl.contains("game") || fl.contains("cocos")
+            }.sorted()
+            for f in interesting { L.append("  \(f)") }
+        }
+        if let fwp = Bundle.main.privateFrameworksPath,
+           let fws = try? FileManager.default.contentsOfDirectory(atPath: fwp) {
+            L.append("PrivateFrameworks:")
+            for f in fws.sorted() { L.append("  \(f)") }
         }
 
-        // ---- XRD INJECTION STATE ----
         L.append("")
         L.append("-- XRD INJECT --")
-        let xrdBundle = Bundle(for: XRDOverlay.self)
-        L.append("XRD bundle: \(xrdBundle.bundlePath)")
-        L.append("XRD id: \(xrdBundle.bundleIdentifier ?? "nil")")
-        let hasInjectJS = xrdBundle.url(forResource: "inject", withExtension: "js") != nil
-        let mainHasJS = Bundle.main.url(forResource: "inject", withExtension: "js") != nil
-        L.append("inject.js in XRD: \(hasInjectJS)")
-        L.append("inject.js in main: \(mainHasJS)")
-        L.append("Container: \(container != nil ? "yes" : "nil")")
-        L.append("ToggleBtn: \(toggleBtn != nil ? "yes" : "nil")")
-        L.append("MacroBtn: \(macroBtn != nil ? "yes" : "nil")")
-        L.append("MenuVisible: \(isMenuVisible)")
+        let xb = Bundle(for: XRDOverlay.self)
+        L.append("Bundle: \(xb.bundlePath)")
+        L.append("inject.js: xrd=\(xb.url(forResource: "inject", withExtension: "js") != nil) main=\(Bundle.main.url(forResource: "inject", withExtension: "js") != nil)")
         L.append("License: \(LicenseManager.shared.isValid)")
 
         L.append("")
-        L.append("=== END FULL DUMP ===")
+        L.append("=== END DUMP ===")
         return L.joined(separator: "\n")
     }
 
@@ -600,25 +460,9 @@ class XRDOverlay: NSObject {
         for sub in view.subviews {
             let pad = String(repeating: "  ", count: indent)
             let name = String(describing: type(of: sub))
-            var extras: [String] = []
-            if sub.isHidden { extras.append("hidden") }
-            if sub.alpha < 1 { extras.append("a=\(String(format: "%.1f", sub.alpha))") }
-            if sub.isUserInteractionEnabled == false { extras.append("noTouch") }
-            let extraStr = extras.isEmpty ? "" : " [\(extras.joined(separator: ","))]"
-            let size = "\(Int(sub.frame.width))x\(Int(sub.frame.height))"
-            lines.append("\(pad)\(name) \(size)\(extraStr)")
+            let extra = sub.isHidden ? " [hidden]" : ""
+            lines.append("\(pad)\(name) \(Int(sub.frame.width))x\(Int(sub.frame.height))\(extra)")
             dumpViewTree(sub, indent: indent + 1, lines: &lines, depth: depth + 1, maxDepth: maxDepth)
-        }
-    }
-
-    private func findAllWKWebViews(in view: UIView, path: String = "", handler: (WKWebView, String) -> Void) {
-        let name = String(describing: type(of: view))
-        let currentPath = path.isEmpty ? name : "\(path)>\(name)"
-        if let wv = view as? WKWebView {
-            handler(wv, currentPath)
-        }
-        for sub in view.subviews {
-            findAllWKWebViews(in: sub, path: currentPath, handler: handler)
         }
     }
 
@@ -656,154 +500,47 @@ class XRDOverlay: NSObject {
         return names.sorted()
     }
 
-    private func dumpCocos2DFull(_ L: inout [String]) {
-        let dirClasses = ["CCDirector", "Director"]
-
-        for dcName in dirClasses {
-            guard let cls = NSClassFromString(dcName) else { continue }
-
+    private func dumpClassMetadata(_ L: inout [String]) {
+        let interesting = [
+            "CCDirector", "Director", "CCGLView_MCPlatform", "CCGLView",
+            "CCEAGLView", "EAGLView", "CCScene", "CCLayer", "CCNode",
+            "CCSprite", "CCCamera", "CCApplication", "CCScheduler",
+            "CCActionManager", "CCTextureCache", "CCDirectorCaller",
+            "AppController", "RootViewController"
+        ]
+        for name in interesting {
+            guard let cls = NSClassFromString(name) else { continue }
             let cm = objcMethodNames(cls, instance: false)
-            L.append("\(dcName) +class(\(cm.count)): \(cm.joined(separator: ", "))")
-
             let im = objcMethodNames(cls)
-            L.append("\(dcName) -inst(\(im.count)):")
-            for m in im { L.append("  -\(m)") }
-
             let props = objcPropertyNames(cls)
-            if !props.isEmpty { L.append("\(dcName) props: \(props.joined(separator: ", "))") }
-
             let ivars = objcIvarNames(cls)
-            if !ivars.isEmpty { L.append("\(dcName) ivars: \(ivars.joined(separator: ", "))") }
-        }
-
-        let singletons = ["sharedDirector", "getInstance", "shared", "sharedInstance"]
-        outer: for dcName in dirClasses {
-            guard let cls = NSClassFromString(dcName) else { continue }
-            for selName in singletons {
-                let sel = NSSelectorFromString(selName)
-                guard cls.responds(to: sel),
-                      let result = (cls as AnyObject).perform(sel) else { continue }
-                let director = result.takeUnretainedValue()
-                L.append("")
-                L.append("Director via \(dcName).\(selName)")
-                L.append("Director runtime class: \(NSStringFromClass(type(of: director)))")
-
-                let allProbes = [
-                    "getWinSize", "winSize", "getWinSizeInPixels",
-                    "getVisibleSize", "visibleSize", "getVisibleOrigin",
-                    "getDesignResolutionSize", "designResolutionSize",
-                    "getFrameSize", "frameSize",
-                    "contentScaleFactor", "getContentScaleFactor",
-                    "zoomFactor", "getZoomFactor", "setZoomFactor:",
-                    "projection", "getProjection", "setProjection:",
-                    "getDefaultCamera", "defaultCamera", "camera",
-                    "getOpenGLView", "openGLView", "getGLView", "glView",
-                    "getRunningScene", "runningScene",
-                    "getScheduler", "scheduler",
-                    "getActionManager", "actionManager",
-                    "isPaused", "paused", "animationInterval",
-                    "totalFrames", "secondsPerFrame",
-                    "setDesignResolutionSize:height:resolutionPolicy:",
-                    "setContentScaleFactor:", "setZoomFactor:",
-                    "setFrameSize:", "setViewport",
-                    "setProjection:", "setGLDefaultValues",
-                    "reshapeProjection:", "getCocos2dVersion", "cocos2dVersion"
-                ]
-                for p in allProbes {
-                    if director.responds(to: NSSelectorFromString(p)) {
-                        L.append("  responds: \(p) ✓")
-                    }
-                }
-
-                let sceneSelectors = ["runningScene", "getRunningScene", "scene", "_runningScene"]
-                for scSel in sceneSelectors {
-                    guard director.responds(to: NSSelectorFromString(scSel)) else { continue }
-                    L.append("  director has: \(scSel)")
-
-                    guard let sr = director.perform(NSSelectorFromString(scSel)) else { continue }
-                    let scene = sr.takeUnretainedValue()
-                    let sceneClass = NSStringFromClass(type(of: scene))
-                    L.append("")
-                    L.append("Scene: \(sceneClass)")
-
-                    let sceneMethods = objcMethodNames(type(of: scene))
-                    L.append("\(sceneClass) -inst(\(sceneMethods.count)):")
-                    for m in sceneMethods { L.append("  -\(m)") }
-                    let sceneProps = objcPropertyNames(type(of: scene))
-                    if !sceneProps.isEmpty { L.append("\(sceneClass) props: \(sceneProps.joined(separator: ", "))") }
-                    let sceneIvars = objcIvarNames(type(of: scene))
-                    if !sceneIvars.isEmpty { L.append("\(sceneClass) ivars: \(sceneIvars.joined(separator: ", "))") }
-
-                    let sceneProbes = ["camera", "getCamera", "defaultCamera",
-                                       "_camera", "getDefaultCamera",
-                                       "scale", "scaleX", "scaleY", "setScale:",
-                                       "anchorPoint", "position", "contentSize",
-                                       "children", "childrenCount", "getChildrenCount",
-                                       "zOrder", "tag", "name", "visible", "running"]
-                    for sp in sceneProbes {
-                        if (scene as AnyObject).responds(to: NSSelectorFromString(sp)) {
-                            L.append("  scene responds: \(sp) ✓")
-                        }
-                    }
-
-                    if (scene as AnyObject).responds(to: NSSelectorFromString("children")),
-                       let cr = (scene as AnyObject).perform(NSSelectorFromString("children")),
-                       let children = cr.takeUnretainedValue() as? NSArray {
-                        L.append("  children count: \(children.count)")
-                        for (i, child) in children.enumerated() where i < 15 {
-                            guard let childType = type(of: child) as? AnyClass else { continue }
-                            let childClass = NSStringFromClass(childType)
-                            L.append("    [\(i)] \(childClass)")
-                            let childMethods = objcMethodNames(childType)
-                            if childMethods.count <= 30 {
-                                L.append("    methods: \(childMethods.joined(separator: ", "))")
-                            } else {
-                                L.append("    methods(\(childMethods.count)):")
-                                for m in childMethods { L.append("      -\(m)") }
-                            }
-                        }
-                    }
-                    break
-                }
-                break outer
-            }
+            L.append("\(name) +\(cm.count) -\(im.count) props=\(props.count) ivars=\(ivars.count)")
+            if !cm.isEmpty { L.append("  +: \(cm.joined(separator: ", "))") }
+            for m in im { L.append("  -\(m)") }
+            if !props.isEmpty { L.append("  props: \(props.joined(separator: ", "))") }
+            if !ivars.isEmpty { L.append("  ivars: \(ivars.joined(separator: ", "))") }
         }
 
         var classCount: UInt32 = 0
         if let classList = objc_copyClassList(&classCount) {
             var relevant: [String] = []
             for i in 0..<Int(classCount) {
-                let name = String(cString: class_getName(classList[i]))
-                let nl = name.lowercased()
+                let n = String(cString: class_getName(classList[i]))
+                let nl = n.lowercased()
                 if nl.contains("camera") || nl.contains("ccscene") ||
                    nl.contains("cclayer") || nl.contains("ccnode") ||
                    nl.contains("ccsprite") || nl.contains("ccaction") ||
                    nl.contains("cctexture") || nl.contains("ccrenderer") ||
-                   nl.contains("ccglprogram") || nl.contains("ccshader") {
-                    relevant.append(name)
+                   nl.contains("ccshader") {
+                    if !interesting.contains(n) { relevant.append(n) }
                 }
             }
             free(UnsafeMutableRawPointer(classList))
-            if !relevant.isEmpty {
-                L.append("")
-                L.append("Cocos classes: \(relevant.sorted().joined(separator: ", "))")
-                for cn in relevant.sorted() {
-                    guard let cls = NSClassFromString(cn) else { continue }
-                    let methods = objcMethodNames(cls)
-                    L.append("\(cn)(\(methods.count)): \(methods.joined(separator: ", "))")
-                }
+            for cn in relevant.sorted() {
+                guard let cls = NSClassFromString(cn) else { continue }
+                let methods = objcMethodNames(cls)
+                L.append("\(cn)(\(methods.count)): \(methods.joined(separator: ", "))")
             }
-        }
-
-        let glViewNames = ["CCGLView_MCPlatform", "CCGLView", "CCEAGLView"]
-        for gvName in glViewNames {
-            guard let cls = NSClassFromString(gvName) else { continue }
-            L.append("")
-            let methods = objcMethodNames(cls)
-            L.append("\(gvName) -inst(\(methods.count)):")
-            for m in methods { L.append("  -\(m)") }
-            let props = objcPropertyNames(cls)
-            if !props.isEmpty { L.append("\(gvName) props: \(props.joined(separator: ", "))") }
         }
     }
 }
