@@ -114,10 +114,12 @@ struct ModMenuView: View {
 
                 if settings.isMacroEnabled {
                     HStack(spacing: 4) {
-                        Circle().fill(Color.green).frame(width: 6, height: 6)
-                        Text("AUTO FEED ON")
+                        Circle()
+                            .fill(NetworkInterceptor.shared.hasGameWS ? Color.green : Color.orange)
+                            .frame(width: 6, height: 6)
+                        Text(NetworkInterceptor.shared.hasGameWS ? "FEEDING" : "NO WS - feed inactive")
                             .font(.system(size: 7, weight: .black, design: .monospaced))
-                            .foregroundColor(.green)
+                            .foregroundColor(NetworkInterceptor.shared.hasGameWS ? .green : .orange)
                     }
 
                     VStack(spacing: 3) {
@@ -170,15 +172,11 @@ struct ModMenuView: View {
                                 .cornerRadius(4)
                         }
                     }
+                } else {
+                    Text("Enable to auto-feed mass")
+                        .font(.system(size: 8, design: .monospaced))
+                        .foregroundColor(.gray.opacity(0.5))
                 }
-            }
-            .sectionStyle()
-
-            VStack(alignment: .leading, spacing: 4) {
-                sectionHeader("STATUS")
-                infoRow("WS Captured", NetworkInterceptor.shared.gameWebSocket != nil ? "Yes" : "No")
-                infoRow("Intercepted", "\(NetworkInterceptor.shared.interceptedCount)")
-                infoRow("Mass", "\(settings.ownMass)")
             }
             .sectionStyle()
 
@@ -254,17 +252,10 @@ struct ModMenuView: View {
             .sectionStyle()
 
             VStack(alignment: .leading, spacing: 4) {
-                if zoomEngine.activeMethod == .engineHook {
+                if zoomEngine.activeMethod == .engineHook || zoomEngine.activeMethod == .objcHook {
                     HStack(spacing: 4) {
                         Circle().fill(Color.green).frame(width: 5, height: 5)
                         Text("Engine hook - real zoom")
-                            .font(.system(size: 8, design: .monospaced))
-                            .foregroundColor(.green.opacity(0.8))
-                    }
-                } else if zoomEngine.activeMethod == .objcHook {
-                    HStack(spacing: 4) {
-                        Circle().fill(Color.green).frame(width: 5, height: 5)
-                        Text("ObjC hook - real zoom")
                             .font(.system(size: 8, design: .monospaced))
                             .foregroundColor(.green.opacity(0.8))
                     }
@@ -290,6 +281,8 @@ struct ModMenuView: View {
 
     private var configTab: some View {
         VStack(spacing: 8) {
+            uidSection
+
             Button(action: {
                 settings.save()
                 showSaved = true
@@ -331,6 +324,7 @@ struct ModMenuView: View {
                 infoRow("Server", NetworkInterceptor.shared.hasServer ? "Yes" : "No")
                 infoRow("WS", NetworkInterceptor.shared.gameWebSocket != nil ? "Captured" : "None")
                 infoRow("Intercepted", "\(NetworkInterceptor.shared.interceptedCount)")
+                infoRow("Mass", "\(settings.ownMass)")
                 if let url = NetworkInterceptor.shared.capturedServerURL {
                     infoRow("URL", String(url.prefix(25)))
                 }
@@ -345,6 +339,54 @@ struct ModMenuView: View {
 
             Spacer(minLength: 8)
         }
+    }
+
+    // MARK: - Your UID (in Config)
+
+    @State private var configCopiedUID = false
+
+    private var uidSection: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            sectionHeader("YOUR UID")
+            HStack(spacing: 4) {
+                Text("Name")
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .foregroundColor(.gray)
+                    .frame(width: 38, alignment: .leading)
+                TextField("Your IGN", text: $settings.playerName)
+                    .textFieldStyle(XRDTextFieldStyle())
+            }
+
+            if !settings.detectedUID.isEmpty {
+                HStack {
+                    Text("UID:")
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .foregroundColor(.gray)
+                    Text(settings.detectedUID)
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundColor(xrdCyan)
+                    Spacer()
+                    Button(action: {
+                        UIPasteboard.general.string = settings.detectedUID
+                        configCopiedUID = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { configCopiedUID = false }
+                    }) {
+                        Text(configCopiedUID ? "Copied!" : "COPY")
+                            .font(.system(size: 8, weight: .bold, design: .monospaced))
+                            .foregroundColor(configCopiedUID ? .green : xrdCyan)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 4)
+                            .background(Color.white.opacity(0.1))
+                            .cornerRadius(4)
+                    }
+                }
+            } else {
+                Text("Launch bots to detect your UID")
+                    .font(.system(size: 7, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.6))
+            }
+        }
+        .sectionStyle()
     }
 
     // MARK: - Helpers

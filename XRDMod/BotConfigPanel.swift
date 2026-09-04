@@ -16,196 +16,17 @@ struct BotConfigPanel: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            serverSection
-            uidSection
-            targetSection
-            botSettings
             launchButtons
             if botEngine.isRunning { botStats }
             playerList
+            serverSection
+            targetSection
+            botSettings
             Spacer(minLength: 8)
         }
     }
 
-    // MARK: - Server
-
-    private var serverSection: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack {
-                sectionHeader("SERVER")
-                Spacer()
-                Circle()
-                    .fill(NetworkInterceptor.shared.hasServer ? Color.green : Color.red)
-                    .frame(width: 6, height: 6)
-                Text(NetworkInterceptor.shared.hasServer ? "OK" : "NONE")
-                    .font(.system(size: 7, weight: .bold, design: .monospaced))
-                    .foregroundColor(NetworkInterceptor.shared.hasServer ? .green : .red)
-            }
-
-            if let url = NetworkInterceptor.shared.bestServerURL {
-                Text(String(url.prefix(35)))
-                    .font(.system(size: 7, design: .monospaced))
-                    .foregroundColor(.gray)
-                    .lineLimit(1)
-            }
-
-            if !NetworkInterceptor.shared.hasServer {
-                Text("Play a game first OR paste server URL below")
-                    .font(.system(size: 7, design: .monospaced))
-                    .foregroundColor(.orange.opacity(0.7))
-
-                HStack(spacing: 4) {
-                    TextField("wss://server-url...", text: $manualServer)
-                        .textFieldStyle(XRDTextFieldStyle())
-                    Button(action: {
-                        if let s = UIPasteboard.general.string {
-                            manualServer = s
-                            NetworkInterceptor.shared.setManualServer(s)
-                        }
-                    }) {
-                        Image(systemName: "doc.on.clipboard")
-                            .font(.system(size: 10))
-                            .foregroundColor(xrdCyan)
-                            .padding(5)
-                            .background(Color.white.opacity(0.1))
-                            .cornerRadius(5)
-                    }
-                    Button(action: {
-                        guard !manualServer.isEmpty else { return }
-                        NetworkInterceptor.shared.setManualServer(manualServer)
-                    }) {
-                        Text("SET")
-                            .font(.system(size: 8, weight: .black, design: .monospaced))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 5)
-                            .background(xrdPurple)
-                            .cornerRadius(5)
-                    }
-                }
-            }
-        }
-        .sectionStyle()
-    }
-
-    // MARK: - Your UID
-
-    private var uidSection: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            sectionHeader("YOUR UID")
-            HStack(spacing: 4) {
-                Text("Name")
-                    .font(.system(size: 8, weight: .bold, design: .monospaced))
-                    .foregroundColor(.gray)
-                    .frame(width: 38, alignment: .leading)
-                TextField("Your IGN", text: $settings.playerName)
-                    .textFieldStyle(XRDTextFieldStyle())
-            }
-
-            if !settings.detectedUID.isEmpty {
-                HStack {
-                    Text("UID:")
-                        .font(.system(size: 8, weight: .bold, design: .monospaced))
-                        .foregroundColor(.gray)
-                    Text(settings.detectedUID)
-                        .font(.system(size: 9, weight: .bold, design: .monospaced))
-                        .foregroundColor(xrdCyan)
-                    Spacer()
-                    Button(action: {
-                        UIPasteboard.general.string = settings.detectedUID
-                        copiedUID = settings.detectedUID
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copiedUID = "" }
-                    }) {
-                        Text(copiedUID == settings.detectedUID ? "Copied!" : "COPY")
-                            .font(.system(size: 8, weight: .bold, design: .monospaced))
-                            .foregroundColor(copiedUID == settings.detectedUID ? .green : xrdCyan)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 4)
-                            .background(Color.white.opacity(0.1))
-                            .cornerRadius(4)
-                    }
-                }
-            } else {
-                Text("Launch bots to detect your UID")
-                    .font(.system(size: 7, design: .monospaced))
-                    .foregroundColor(.gray.opacity(0.6))
-            }
-        }
-        .sectionStyle()
-    }
-
-    // MARK: - Target
-
-    private var targetSection: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            sectionHeader("TARGET")
-            HStack(spacing: 4) {
-                TextField("UID or name", text: $settings.botConfig.targetUID)
-                    .textFieldStyle(XRDTextFieldStyle())
-                Button(action: {
-                    if let s = UIPasteboard.general.string { settings.botConfig.targetUID = s }
-                }) {
-                    Image(systemName: "doc.on.clipboard")
-                        .font(.system(size: 10))
-                        .foregroundColor(xrdCyan)
-                        .padding(5)
-                        .background(Color.white.opacity(0.1))
-                        .cornerRadius(5)
-                }
-            }
-
-            HStack(spacing: 4) {
-                Text("Code")
-                    .font(.system(size: 8, weight: .bold, design: .monospaced))
-                    .foregroundColor(.gray)
-                    .frame(width: 38, alignment: .leading)
-                TextField("Party code", text: $groupCode)
-                    .textFieldStyle(XRDTextFieldStyle())
-                Button(action: {
-                    if let s = UIPasteboard.general.string { groupCode = s }
-                }) {
-                    Image(systemName: "doc.on.clipboard")
-                        .font(.system(size: 10))
-                        .foregroundColor(xrdCyan)
-                        .padding(5)
-                        .background(Color.white.opacity(0.1))
-                        .cornerRadius(5)
-                }
-            }
-        }
-        .sectionStyle()
-    }
-
-    // MARK: - Bot Settings
-
-    private var botSettings: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            sectionHeader("BOTS")
-
-            fieldRow("Count") {
-                HStack(spacing: 3) {
-                    ForEach([5, 10, 25, 50], id: \.self) { n in cntBtn(n) }
-                }
-            }
-
-            fieldRow("Names") {
-                TextField("Comma sep.", text: $nameInput)
-                    .textFieldStyle(XRDTextFieldStyle())
-                    .onChange(of: nameInput) { v in
-                        settings.botConfig.botNames = v.split(separator: ",")
-                            .map { String($0).trimmingCharacters(in: .whitespaces) }
-                        if settings.botConfig.botNames.isEmpty {
-                            settings.botConfig.botNames = ["XRD Bot"]
-                        }
-                    }
-            }
-
-            XRDDropdown(label: "Action", selection: $settings.botConfig.botAction)
-        }
-        .sectionStyle()
-    }
-
-    // MARK: - Launch / Stop
+    // MARK: - Launch / Stop (TOP)
 
     private var launchButtons: some View {
         HStack(spacing: 8) {
@@ -304,7 +125,147 @@ struct BotConfigPanel: View {
                 }
             }
             .sectionStyle()
+        } else if botEngine.isRunning {
+            VStack(alignment: .leading, spacing: 3) {
+                sectionHeader("PLAYERS")
+                Text("Waiting for world data...")
+                    .font(.system(size: 8, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.5))
+            }
+            .sectionStyle()
         }
+    }
+
+    // MARK: - Server
+
+    private var serverSection: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                sectionHeader("SERVER")
+                Spacer()
+                Circle()
+                    .fill(NetworkInterceptor.shared.hasServer ? Color.green : Color.red)
+                    .frame(width: 6, height: 6)
+                Text(NetworkInterceptor.shared.hasServer ? "OK" : "NONE")
+                    .font(.system(size: 7, weight: .bold, design: .monospaced))
+                    .foregroundColor(NetworkInterceptor.shared.hasServer ? .green : .red)
+            }
+
+            if let url = NetworkInterceptor.shared.bestServerURL {
+                Text(String(url.prefix(35)))
+                    .font(.system(size: 7, design: .monospaced))
+                    .foregroundColor(.gray)
+                    .lineLimit(1)
+            }
+
+            if !NetworkInterceptor.shared.hasServer {
+                Text("Play a game first OR paste URL below")
+                    .font(.system(size: 7, design: .monospaced))
+                    .foregroundColor(.orange.opacity(0.7))
+
+                HStack(spacing: 4) {
+                    TextField("wss://server-url...", text: $manualServer)
+                        .textFieldStyle(XRDTextFieldStyle())
+                    Button(action: {
+                        if let s = UIPasteboard.general.string {
+                            manualServer = s
+                            NetworkInterceptor.shared.setManualServer(s)
+                        }
+                    }) {
+                        Image(systemName: "doc.on.clipboard")
+                            .font(.system(size: 10))
+                            .foregroundColor(xrdCyan)
+                            .padding(5)
+                            .background(Color.white.opacity(0.1))
+                            .cornerRadius(5)
+                    }
+                    Button(action: {
+                        guard !manualServer.isEmpty else { return }
+                        NetworkInterceptor.shared.setManualServer(manualServer)
+                    }) {
+                        Text("SET")
+                            .font(.system(size: 8, weight: .black, design: .monospaced))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 5)
+                            .background(xrdPurple)
+                            .cornerRadius(5)
+                    }
+                }
+            }
+        }
+        .sectionStyle()
+    }
+
+    // MARK: - Target
+
+    private var targetSection: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            sectionHeader("TARGET")
+            HStack(spacing: 4) {
+                TextField("UID or name", text: $settings.botConfig.targetUID)
+                    .textFieldStyle(XRDTextFieldStyle())
+                Button(action: {
+                    if let s = UIPasteboard.general.string { settings.botConfig.targetUID = s }
+                }) {
+                    Image(systemName: "doc.on.clipboard")
+                        .font(.system(size: 10))
+                        .foregroundColor(xrdCyan)
+                        .padding(5)
+                        .background(Color.white.opacity(0.1))
+                        .cornerRadius(5)
+                }
+            }
+
+            HStack(spacing: 4) {
+                Text("Code")
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .foregroundColor(.gray)
+                    .frame(width: 38, alignment: .leading)
+                TextField("Party code", text: $groupCode)
+                    .textFieldStyle(XRDTextFieldStyle())
+                Button(action: {
+                    if let s = UIPasteboard.general.string { groupCode = s }
+                }) {
+                    Image(systemName: "doc.on.clipboard")
+                        .font(.system(size: 10))
+                        .foregroundColor(xrdCyan)
+                        .padding(5)
+                        .background(Color.white.opacity(0.1))
+                        .cornerRadius(5)
+                }
+            }
+        }
+        .sectionStyle()
+    }
+
+    // MARK: - Bot Settings
+
+    private var botSettings: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            sectionHeader("BOTS")
+
+            fieldRow("Count") {
+                HStack(spacing: 3) {
+                    ForEach([5, 10, 25, 50], id: \.self) { n in cntBtn(n) }
+                }
+            }
+
+            fieldRow("Names") {
+                TextField("Comma sep.", text: $nameInput)
+                    .textFieldStyle(XRDTextFieldStyle())
+                    .onChange(of: nameInput) { v in
+                        settings.botConfig.botNames = v.split(separator: ",")
+                            .map { String($0).trimmingCharacters(in: .whitespaces) }
+                        if settings.botConfig.botNames.isEmpty {
+                            settings.botConfig.botNames = ["XRD Bot"]
+                        }
+                    }
+            }
+
+            XRDDropdown(label: "Action", selection: $settings.botConfig.botAction)
+        }
+        .sectionStyle()
     }
 
     // MARK: - Actions
