@@ -41,8 +41,8 @@ class GameJSBridge: NSObject, WKScriptMessageHandler {
 
         wv.configuration.userContentController.add(self, name: "xrdBridge")
 
-        guard let bundle = Bundle(for: GameJSBridge.self),
-              let jsURL = bundle.url(forResource: "inject", withExtension: "js"),
+        let bundle = Bundle(for: GameJSBridge.self)
+        guard let jsURL = bundle.url(forResource: "inject", withExtension: "js"),
               let jsCode = try? String(contentsOf: jsURL) else { return }
 
         let userScript = WKUserScript(source: jsCode, injectionTime: .atDocumentEnd, forMainFrameOnly: true)

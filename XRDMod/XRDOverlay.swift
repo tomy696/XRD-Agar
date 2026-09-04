@@ -443,7 +443,7 @@ class ZoomEngine: NSObject, ObservableObject {
 
                 let scaleSel = NSSelectorFromString("setScale:")
                 guard scene.responds(to: scaleSel),
-                      let imp = class_getMethodImplementation(type(of: scene) as? AnyClass, scaleSel) else { continue }
+                      let imp = class_getMethodImplementation(type(of: scene), scaleSel) else { continue }
 
                 let dirRef = director
                 let scSelCopy = sceneSel
