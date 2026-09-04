@@ -440,10 +440,21 @@ class ZoomEngine: ObservableObject {
         guard let view = gameView else { return }
         if abs(factor - 1.0) < 0.01 {
             view.transform = .identity
+            view.bounds = CGRect(origin: .zero, size: originalFrame.size)
+            view.center = CGPoint(x: originalFrame.midX, y: originalFrame.midY)
             return
         }
         let scale = 1.0 / factor
+        view.transform = .identity
+        view.bounds = CGRect(
+            origin: .zero,
+            width: originalFrame.width * factor,
+            height: originalFrame.height * factor
+        )
+        view.center = CGPoint(x: originalFrame.midX, y: originalFrame.midY)
         view.transform = CGAffineTransform(scaleX: scale, y: scale)
+        view.setNeedsLayout()
+        view.layoutIfNeeded()
     }
 
     // MARK: - Game view detection

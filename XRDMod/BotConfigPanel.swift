@@ -6,6 +6,7 @@ struct BotConfigPanel: View {
     @State private var nameInput: String = "XRD Bot"
     @State private var groupCode: String = ""
     @State private var manualServer: String = ""
+    @State private var copiedUID: String = ""
 
     private var xrdPurple: Color { Color(red: 0.459, green: 0.318, blue: 0.957) }
     private var xrdCyan: Color { Color(red: 0.2, green: 0.8, blue: 0.9) }
@@ -110,11 +111,16 @@ struct BotConfigPanel: View {
                         .font(.system(size: 9, weight: .bold, design: .monospaced))
                         .foregroundColor(xrdCyan)
                     Spacer()
-                    Button(action: { UIPasteboard.general.string = settings.detectedUID }) {
-                        Image(systemName: "doc.on.doc")
-                            .font(.system(size: 10))
-                            .foregroundColor(xrdCyan)
-                            .padding(4)
+                    Button(action: {
+                        UIPasteboard.general.string = settings.detectedUID
+                        copiedUID = settings.detectedUID
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copiedUID = "" }
+                    }) {
+                        Text(copiedUID == settings.detectedUID ? "Copied!" : "COPY")
+                            .font(.system(size: 8, weight: .bold, design: .monospaced))
+                            .foregroundColor(copiedUID == settings.detectedUID ? .green : xrdCyan)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 4)
                             .background(Color.white.opacity(0.1))
                             .cornerRadius(4)
                     }
@@ -268,10 +274,12 @@ struct BotConfigPanel: View {
 
                         Button(action: {
                             UIPasteboard.general.string = player.uid
+                            copiedUID = player.uid
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copiedUID = "" }
                         }) {
-                            Text(String(player.uid.prefix(6)))
-                                .font(.system(size: 8, design: .monospaced))
-                                .foregroundColor(xrdCyan)
+                            Text(copiedUID == player.uid ? "OK!" : String(player.uid.prefix(6)))
+                                .font(.system(size: 8, weight: .bold, design: .monospaced))
+                                .foregroundColor(copiedUID == player.uid ? .green : xrdCyan)
                                 .padding(.horizontal, 4)
                                 .padding(.vertical, 2)
                                 .background(Color.white.opacity(0.06))
