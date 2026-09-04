@@ -7,6 +7,8 @@ struct ModMenuView: View {
     @State private var activeTab: MenuTab = .macro
     @State private var showSaved = false
     @State private var manualServer: String = ""
+    @State private var configCopiedUID = false
+    @State private var debugCopied = false
 
     enum MenuTab: String, CaseIterable {
         case macro = "Macro"
@@ -297,83 +299,97 @@ struct ModMenuView: View {
     // MARK: - Config Tab
 
     private var configTab: some View {
-        VStack(spacing: 8) {
+        let jsStatus: String = XRDOverlay.shared.jsBridge.isConnected ? "Connected" : XRDOverlay.shared.jsBridge.statusInfo
+        let zoomMethod: String = zoomEngine.activeMethod.rawValue
+        let wsStatus: String = NetworkInterceptor.shared.gameWebSocket != nil ? "Captured" : "None"
+        let intercepted: String = "\(NetworkInterceptor.shared.interceptedCount)"
+        let licenseStatus: String = settings.isLicenseValid ? "Active" : "Inactive"
+
+        return VStack(spacing: 8) {
             uidSection
             serverConfigSection
-
-            HStack(spacing: 6) {
-                Button(action: {
-                    settings.save()
-                    showSaved = true
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { showSaved = false }
-                }) {
-                    HStack(spacing: 3) {
-                        Image(systemName: "square.and.arrow.down.fill").font(.system(size: 10))
-                        Text(showSaved ? "OK!" : "SAVE").font(.system(size: 9, weight: .black, design: .monospaced))
-                    }
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .background(showSaved ? Color.green.opacity(0.7) : xrdPurple)
-                    .cornerRadius(6)
-                }
-
-                Button(action: { settings.resetAll() }) {
-                    HStack(spacing: 3) {
-                        Image(systemName: "arrow.counterclockwise").font(.system(size: 10))
-                        Text("RESET").font(.system(size: 9, weight: .black, design: .monospaced))
-                    }
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .background(Color.red.opacity(0.6))
-                    .cornerRadius(6)
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 3) {
-                sectionHeader("DEBUG")
-                infoRow("License", settings.isLicenseValid ? "Active" : "Inactive")
-                infoRow("WS", NetworkInterceptor.shared.gameWebSocket != nil ? "Captured" : "None")
-                infoRow("JS", XRDOverlay.shared.jsBridge.isConnected ? "Connected" : XRDOverlay.shared.jsBridge.statusInfo)
-                infoRow("Zoom", XRDOverlay.shared.zoomEngine.activeMethod.rawValue)
-                infoRow("Intercepted", "\(NetworkInterceptor.shared.interceptedCount)")
-            }
-            .sectionStyle()
-
-            Button(action: {
-                let dump = XRDOverlay.shared.debugDump()
-                UIPasteboard.general.string = dump
-                debugCopied = true
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { debugCopied = false }
-            }) {
-                HStack(spacing: 4) {
-                    Image(systemName: debugCopied ? "checkmark.circle.fill" : "doc.on.doc")
-                        .font(.system(size: 10))
-                    Text(debugCopied ? "COPIED!" : "COPY DEBUG")
-                        .font(.system(size: 9, weight: .black, design: .monospaced))
-                }
-                .foregroundColor(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-                .background(debugCopied ? Color.green.opacity(0.7) : Color.orange.opacity(0.7))
-                .cornerRadius(6)
-            }
-
-            VStack(alignment: .leading, spacing: 3) {
-                infoRow("Version", "2.0")
-                infoRow("Mod", "XRD Agar.io")
-            }
-            .sectionStyle()
-
+            configButtons
+            configDebugSection(license: licenseStatus, ws: wsStatus, js: jsStatus, zoom: zoomMethod, intercepted: intercepted)
+            copyDebugButton
+            configVersionSection
             Spacer(minLength: 8)
         }
     }
 
-    // MARK: - Your UID (in Config)
+    private var configButtons: some View {
+        HStack(spacing: 6) {
+            Button(action: {
+                settings.save()
+                showSaved = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { showSaved = false }
+            }) {
+                HStack(spacing: 3) {
+                    Image(systemName: "square.and.arrow.down.fill").font(.system(size: 10))
+                    Text(showSaved ? "OK!" : "SAVE").font(.system(size: 9, weight: .black, design: .monospaced))
+                }
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(showSaved ? Color.green.opacity(0.7) : xrdPurple)
+                .cornerRadius(6)
+            }
 
-    @State private var configCopiedUID = false
-    @State private var debugCopied = false
+            Button(action: { settings.resetAll() }) {
+                HStack(spacing: 3) {
+                    Image(systemName: "arrow.counterclockwise").font(.system(size: 10))
+                    Text("RESET").font(.system(size: 9, weight: .black, design: .monospaced))
+                }
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(Color.red.opacity(0.6))
+                .cornerRadius(6)
+            }
+        }
+    }
+
+    private func configDebugSection(license: String, ws: String, js: String, zoom: String, intercepted: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            sectionHeader("DEBUG")
+            infoRow("License", license)
+            infoRow("WS", ws)
+            infoRow("JS", js)
+            infoRow("Zoom", zoom)
+            infoRow("Intercepted", intercepted)
+        }
+        .sectionStyle()
+    }
+
+    private var copyDebugButton: some View {
+        Button(action: {
+            let dump = XRDOverlay.shared.debugDump()
+            UIPasteboard.general.string = dump
+            debugCopied = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { debugCopied = false }
+        }) {
+            HStack(spacing: 4) {
+                Image(systemName: debugCopied ? "checkmark.circle.fill" : "doc.on.doc")
+                    .font(.system(size: 10))
+                Text(debugCopied ? "COPIED!" : "COPY DEBUG")
+                    .font(.system(size: 9, weight: .black, design: .monospaced))
+            }
+            .foregroundColor(.white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .background(debugCopied ? Color.green.opacity(0.7) : Color.orange.opacity(0.7))
+            .cornerRadius(6)
+        }
+    }
+
+    private var configVersionSection: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            infoRow("Version", "2.0")
+            infoRow("Mod", "XRD Agar.io")
+        }
+        .sectionStyle()
+    }
+
+    // MARK: - Your UID (in Config)
 
     private var uidSection: some View {
         VStack(alignment: .leading, spacing: 5) {
