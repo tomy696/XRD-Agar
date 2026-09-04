@@ -440,14 +440,14 @@ class ZoomEngine: ObservableObject {
         guard let view = gameView else { return }
         if abs(factor - 1.0) < 0.01 {
             view.transform = .identity
-            view.bounds = CGRect(origin: .zero, size: originalFrame.size)
+            view.bounds = CGRect(x: 0, y: 0, width: originalFrame.width, height: originalFrame.height)
             view.center = CGPoint(x: originalFrame.midX, y: originalFrame.midY)
             return
         }
         let scale = 1.0 / factor
         view.transform = .identity
         view.bounds = CGRect(
-            origin: .zero,
+            x: 0, y: 0,
             width: originalFrame.width * factor,
             height: originalFrame.height * factor
         )
