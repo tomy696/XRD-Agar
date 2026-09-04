@@ -12,15 +12,59 @@
 
         init: function() {
             this.hookCanvas();
-            this.hookWebSocket();
             this.startPlayerScan();
             this.notifyNative('ready', 'ok');
+        },
+
+        hookWebSocket: function() {
+            var self = this;
+            var OrigWebSocket = window.WebSocket;
+
+            // Hook prototype.send to capture EXISTING WebSocket connections
+            var origSend = WebSocket.prototype.send;
+            WebSocket.prototype.send = function(data) {
+                if (this.url && self.activeWS !== this) {
+                    self.activeWS = this;
+                    self.notifyNative('serverURL', this.url);
+                    if (!this._xrdHooked) {
+                        this._xrdHooked = true;
+                        this.addEventListener('message', function(e) {
+                            if (e.data instanceof ArrayBuffer) {
+                                self.parseServerMessage(new DataView(e.data));
+                            }
+                        });
+                    }
+                }
+                return origSend.call(this, data);
+            };
+
+            // Hook constructor for NEW connections
+            window.WebSocket = function(url, protocols) {
+                self.notifyNative('serverURL', url);
+                var ws = protocols
+                    ? new OrigWebSocket(url, protocols)
+                    : new OrigWebSocket(url);
+                ws._xrdHooked = true;
+                ws.addEventListener('message', function(e) {
+                    if (e.data instanceof ArrayBuffer) {
+                        self.parseServerMessage(new DataView(e.data));
+                    }
+                });
+                self.activeWS = ws;
+                return ws;
+            };
+            window.WebSocket.prototype = OrigWebSocket.prototype;
+            window.WebSocket.CONNECTING = OrigWebSocket.CONNECTING;
+            window.WebSocket.OPEN = OrigWebSocket.OPEN;
+            window.WebSocket.CLOSING = OrigWebSocket.CLOSING;
+            window.WebSocket.CLOSED = OrigWebSocket.CLOSED;
+
+            self.notifyNative('hooks', 'ws-hooked');
         },
 
         hookCanvas: function() {
             var self = this;
 
-            // Hook setTransform — catches camera set via ctx.setTransform(zoom,0,0,zoom,cx,cy)
             var origSetTransform = CanvasRenderingContext2D.prototype.setTransform;
             CanvasRenderingContext2D.prototype.setTransform = function(a, b, c, d, e, f) {
                 if (typeof a === 'number' && self.zoomLevel !== 1.0
@@ -32,7 +76,6 @@
                 return origSetTransform.call(this, a, b, c, d, e, f);
             };
 
-            // Hook scale — catches camera set via ctx.scale(zoom, zoom)
             var origScale = CanvasRenderingContext2D.prototype.scale;
             CanvasRenderingContext2D.prototype.scale = function(x, y) {
                 if (self.zoomLevel !== 1.0 && this.canvas && this.canvas.width > 100) {
@@ -41,7 +84,6 @@
                 return origScale.call(this, x, y);
             };
 
-            // Hook WebGL viewport (if game uses WebGL)
             try {
                 var WGL = WebGLRenderingContext.prototype;
                 var origViewport = WGL.viewport;
@@ -74,34 +116,7 @@
                 };
             } catch (e) {}
 
-            self.notifyNative('hooks', 'installed');
-        },
-
-        hookWebSocket: function() {
-            var OrigWebSocket = window.WebSocket;
-            var self = this;
-
-            window.WebSocket = function(url, protocols) {
-                self.notifyNative('serverURL', url);
-
-                var ws = protocols
-                    ? new OrigWebSocket(url, protocols)
-                    : new OrigWebSocket(url);
-
-                ws.addEventListener('message', function(e) {
-                    if (e.data instanceof ArrayBuffer) {
-                        self.parseServerMessage(new DataView(e.data));
-                    }
-                });
-
-                self.activeWS = ws;
-                return ws;
-            };
-            window.WebSocket.prototype = OrigWebSocket.prototype;
-            window.WebSocket.CONNECTING = OrigWebSocket.CONNECTING;
-            window.WebSocket.OPEN = OrigWebSocket.OPEN;
-            window.WebSocket.CLOSING = OrigWebSocket.CLOSING;
-            window.WebSocket.CLOSED = OrigWebSocket.CLOSED;
+            self.notifyNative('hooks', 'canvas-hooked');
         },
 
         parseServerMessage: function(view) {
@@ -230,6 +245,10 @@
         }
     };
 
+    // Hook WebSocket IMMEDIATELY — before any game code runs
+    XRD.hookWebSocket();
+
+    // Canvas hooks + player scan after DOM ready
     if (document.readyState === 'complete' || document.readyState === 'interactive') {
         XRD.init();
     } else {

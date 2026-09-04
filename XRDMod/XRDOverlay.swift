@@ -49,8 +49,10 @@ class XRDOverlay: NSObject {
 
             self.jsBridge.onConnected = { [weak self] in
                 guard let self = self else { return }
-                self.zoomEngine.activeMethod = .jsHook
-                self.zoomEngine.statusText = "JS zoom active"
+                if !self.zoomEngine.isNativeGame {
+                    self.zoomEngine.activeMethod = .jsHook
+                    self.zoomEngine.statusText = "JS zoom active"
+                }
                 self.zoomEngine.debugInfo = self.jsBridge.statusInfo
                 if self.settings.isMacroEnabled {
                     let ms = Int(self.settings.feedInterval * 1000)
@@ -381,6 +383,7 @@ class ZoomEngine: NSObject, ObservableObject {
     @Published var activeMethod: Method = .displayZoom
     @Published var statusText: String = "Searching..."
     @Published var debugInfo: String = ""
+    var isNativeGame: Bool = false
 
     private weak var gameWindow: UIWindow?
     private var gameView: UIView?
@@ -402,7 +405,11 @@ class ZoomEngine: NSObject, ObservableObject {
         }
         if let gv = gameView {
             originalFrame = gv.frame
-            debugInfo = String(describing: type(of: gv))
+            let viewName = String(describing: type(of: gv))
+            debugInfo = viewName
+            let nativeHints = ["CCGL", "CCMetal", "CCEAGL", "GLView", "EAGLView",
+                               "MetalView", "MTKView", "GLKView", "Cocos", "Unity"]
+            isNativeGame = nativeHints.contains(where: { viewName.localizedCaseInsensitiveContains($0) })
         }
 
         if tryCppHooks() {
@@ -429,7 +436,7 @@ class ZoomEngine: NSObject, ObservableObject {
         currentZoom = factor
         if let scale = engineSetScale {
             scale(Float(factor))
-        } else if let bridge = jsBridge, bridge.isConnected {
+        } else if !isNativeGame, let bridge = jsBridge, bridge.isConnected {
             bridge.setZoom(factor)
             if activeMethod != .jsHook {
                 activeMethod = .jsHook
@@ -437,6 +444,10 @@ class ZoomEngine: NSObject, ObservableObject {
             }
         } else {
             applyDisplayZoom(factor)
+            if activeMethod != .displayZoom {
+                activeMethod = .displayZoom
+                statusText = "Display zoom"
+            }
         }
     }
 
@@ -501,7 +512,10 @@ class ZoomEngine: NSObject, ObservableObject {
     private func tryObjCHooks() -> Bool {
         let classNames = ["CCDirector", "Director", "CCDirectorCaller",
                           "cocos2d.Director", "AppController"]
-        let singletons = ["sharedDirector", "getInstance", "shared"]
+        let singletons = ["sharedDirector", "getInstance", "shared",
+                          "sharedInstance", "director", "currentDirector"]
+        let sceneSelectors = ["runningScene", "getRunningScene", "scene",
+                              "currentScene", "_runningScene"]
 
         for className in classNames {
             guard let cls = NSClassFromString(className) else { continue }
@@ -511,27 +525,29 @@ class ZoomEngine: NSObject, ObservableObject {
                       let result = (cls as AnyObject).perform(sel) else { continue }
                 let director = result.takeUnretainedValue()
 
-                let sceneSel = NSSelectorFromString("runningScene")
-                guard director.responds(to: sceneSel),
-                      let sceneResult = director.perform(sceneSel) else { continue }
-                let scene = sceneResult.takeUnretainedValue()
+                for sceneSelName in sceneSelectors {
+                    let sceneSel = NSSelectorFromString(sceneSelName)
+                    guard director.responds(to: sceneSel),
+                          let sceneResult = director.perform(sceneSel) else { continue }
+                    let scene = sceneResult.takeUnretainedValue()
 
-                let scaleSel = NSSelectorFromString("setScale:")
-                guard scene.responds(to: scaleSel),
-                      let imp = class_getMethodImplementation(type(of: scene), scaleSel) else { continue }
+                    let scaleSel = NSSelectorFromString("setScale:")
+                    guard scene.responds(to: scaleSel),
+                          let imp = class_getMethodImplementation(type(of: scene), scaleSel) else { continue }
 
-                let dirRef = director
-                let scSelCopy = sceneSel
+                    let dirRef = director
+                    let scSelCopy = sceneSel
 
-                engineSetScale = { scale in
-                    guard let sr = dirRef.perform(scSelCopy) else { return }
-                    let sc = sr.takeUnretainedValue()
-                    typealias Fn = @convention(c) (AnyObject, Selector, CGFloat) -> Void
-                    let fn = unsafeBitCast(imp, to: Fn.self)
-                    fn(sc, NSSelectorFromString("setScale:"), CGFloat(scale))
+                    engineSetScale = { scale in
+                        guard let sr = dirRef.perform(scSelCopy) else { return }
+                        let sc = sr.takeUnretainedValue()
+                        typealias Fn = @convention(c) (AnyObject, Selector, CGFloat) -> Void
+                        let fn = unsafeBitCast(imp, to: Fn.self)
+                        fn(sc, NSSelectorFromString("setScale:"), CGFloat(scale))
+                    }
+                    debugInfo = "ObjC \(className).\(sceneSelName)"
+                    return true
                 }
-                debugInfo = "ObjC \(className)"
-                return true
             }
         }
         return false
@@ -583,8 +599,9 @@ class ZoomEngine: NSObject, ObservableObject {
 
     private func findGameView(in window: UIWindow) -> UIView? {
         guard let root = window.rootViewController?.view else { return nil }
-        let hints = ["CCEAGL", "CCMetal", "CCRender", "MTKView", "GLKView",
-                     "EAGLView", "MetalView", "OpenGL", "Cocos", "cocos"]
+        let hints = ["CCGLView", "CCGL", "CCEAGL", "CCMetal", "CCRender",
+                     "MTKView", "GLKView", "EAGLView", "MetalView",
+                     "OpenGL", "Cocos", "cocos"]
         if let found = findByClass(root, hints: hints) { return found }
         return findBiggestOpaque(root)
     }

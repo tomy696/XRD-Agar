@@ -72,7 +72,7 @@ class GameJSBridge: NSObject, WKScriptMessageHandler {
 
         let jsCode = loadJS()
 
-        let userScript = WKUserScript(source: jsCode, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
+        let userScript = WKUserScript(source: jsCode, injectionTime: .atDocumentStart, forMainFrameOnly: false)
         wv.configuration.userContentController.addUserScript(userScript)
 
         wv.evaluateJavaScript(jsCode) { [weak self] _, error in
@@ -146,7 +146,12 @@ class GameJSBridge: NSObject, WKScriptMessageHandler {
 
     private static let fallbackJS = """
     (function(){
-        var z=1;
+        var z=1,aws=null;
+        var oSend=WebSocket.prototype.send;
+        WebSocket.prototype.send=function(d){
+            if(this.url&&aws!==this){aws=this;try{window.webkit.messageHandlers.xrdBridge.postMessage({type:'serverURL',data:this.url})}catch(e){}}
+            return oSend.call(this,d);
+        };
         var oS=CanvasRenderingContext2D.prototype.scale;
         CanvasRenderingContext2D.prototype.scale=function(x,y){
             if(z!==1&&this.canvas&&this.canvas.width>100)return oS.call(this,x*z,y*z);
@@ -162,13 +167,13 @@ class GameJSBridge: NSObject, WKScriptMessageHandler {
         window.WebSocket=function(u,p){
             try{window.webkit.messageHandlers.xrdBridge.postMessage({type:'serverURL',data:u})}catch(e){}
             var ws=p?new oWS(u,p):new oWS(u);
-            window._xrdWS=ws;
+            aws=ws;
             return ws;
         };
         window.WebSocket.prototype=oWS.prototype;
         window.XRD={
             setZoom:function(l){z=l},
-            sendFeed:function(){var ws=window._xrdWS;if(ws&&ws.readyState===1){var p=new ArrayBuffer(1);new DataView(p).setUint8(0,21);ws.send(p)}},
+            sendFeed:function(){if(aws&&aws.readyState===1){var p=new ArrayBuffer(1);new DataView(p).setUint8(0,21);aws.send(p)}},
             setFeedInterval:function(){}
         };
         try{window.webkit.messageHandlers.xrdBridge.postMessage({type:'ready',data:'fallback'})}catch(e){}
