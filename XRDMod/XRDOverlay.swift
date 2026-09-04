@@ -301,26 +301,41 @@ class XRDOverlay: NSObject {
         if let url = bundle.url(forResource: "GameConfiguration", withExtension: "json"),
            let data = try? Data(contentsOf: url),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            extractServerURLs(from: json, prefix: "GameConfig")
+            dumpAllKeys(from: json, prefix: "GameConfig")
         }
 
         if let url = bundle.url(forResource: "GameConfiguration", withExtension: "plist"),
            let dict = NSDictionary(contentsOf: url) as? [String: Any] {
-            extractServerURLs(from: dict, prefix: "GamePlist")
+            dumpAllKeys(from: dict, prefix: "GamePlist")
         }
 
         if let url = bundle.url(forResource: "EnvironmentsConfiguration", withExtension: "plist"),
            let dict = NSDictionary(contentsOf: url) as? [String: Any] {
-            extractServerURLs(from: dict, prefix: "Env")
+            dumpAllKeys(from: dict, prefix: "Env")
         }
 
         for name in ["Slice_External - Service Keys",
                      "Slice_Default Settings - Regions",
-                     "Slice_Default Settings - Gameplay"] {
+                     "Slice_Default Settings - Gameplay",
+                     "Slice_Default Settings - UI",
+                     "Slice_Default Settings - Network"] {
             if let url = bundle.url(forResource: name, withExtension: "plist"),
                let dict = NSDictionary(contentsOf: url) as? [String: Any] {
-                let short = name.replacingOccurrences(of: "Slice_", with: "").prefix(20)
-                extractServerURLs(from: dict, prefix: String(short))
+                let short = name.replacingOccurrences(of: "Slice_Default Settings - ", with: "")
+                    .replacingOccurrences(of: "Slice_External - ", with: "")
+                    .prefix(16)
+                dumpAllKeys(from: dict, prefix: String(short))
+            }
+        }
+
+        if let rp = bundle.resourcePath,
+           let files = try? FileManager.default.contentsOfDirectory(atPath: rp) {
+            for f in files where f.hasSuffix(".plist") && !f.hasPrefix("Info") {
+                if let url = bundle.url(forResource: (f as NSString).deletingPathExtension, withExtension: "plist"),
+                   let dict = NSDictionary(contentsOf: url) as? [String: Any] {
+                    let short = String((f as NSString).deletingPathExtension.prefix(16))
+                    dumpAllKeys(from: dict, prefix: short)
+                }
             }
         }
 
@@ -330,44 +345,35 @@ class XRDOverlay: NSObject {
         }
     }
 
-    private func extractServerURLs(from dict: [String: Any], prefix: String) {
-        func scan(_ obj: Any, path: String) {
-            if let s = obj as? String {
-                let sl = s.lowercased()
-                if sl.contains("http") || sl.contains("ws:") || sl.contains("wss:") ||
-                   sl.contains("agar") || sl.contains("miniclip") || sl.contains("server") ||
-                   sl.contains("endpoint") || sl.contains("api") || sl.contains("arena") ||
-                   sl.contains("tech.") || sl.contains("socket") || sl.contains("gateway") {
-                    gameConfigData["\(prefix).\(path)"] = String(s.prefix(200))
-                }
-            } else if let d = obj as? [String: Any] {
-                for (k, v) in d {
-                    let kl = k.lowercased()
-                    if kl.contains("url") || kl.contains("server") || kl.contains("host") ||
-                       kl.contains("endpoint") || kl.contains("api") || kl.contains("socket") ||
-                       kl.contains("arena") || kl.contains("gateway") || kl.contains("region") ||
-                       kl.contains("address") || kl.contains("domain") || kl.contains("env") ||
-                       kl.contains("base") || kl.contains("config") || kl.contains("network") {
-                        if let sv = v as? String {
-                            gameConfigData["\(prefix).\(path).\(k)"] = String(sv.prefix(200))
-                        } else {
-                            scan(v, path: "\(path).\(k)")
-                        }
-                    }
-                    if let sv = v as? String, sv.contains("://") {
-                        gameConfigData["\(prefix).\(path).\(k)"] = String(sv.prefix(200))
+    private func dumpAllKeys(from dict: [String: Any], prefix: String, depth: Int = 0) {
+        guard depth < 3 else { return }
+        for (k, v) in dict.sorted(by: { $0.key < $1.key }) {
+            let key = "\(prefix).\(k)"
+            if let s = v as? String {
+                gameConfigData[key] = String(s.prefix(120))
+            } else if let n = v as? NSNumber {
+                gameConfigData[key] = n.stringValue
+            } else if let d = v as? [String: Any] {
+                gameConfigData[key] = "{dict:\(d.count)}"
+                dumpAllKeys(from: d, prefix: key, depth: depth + 1)
+            } else if let a = v as? [Any] {
+                gameConfigData[key] = "[arr:\(a.count)]"
+                for (i, item) in a.prefix(5).enumerated() {
+                    if let s = item as? String {
+                        gameConfigData["\(key)[\(i)]"] = String(s.prefix(120))
+                    } else if let d = item as? [String: Any] {
+                        dumpAllKeys(from: d, prefix: "\(key)[\(i)]", depth: depth + 1)
                     }
                 }
-            } else if let arr = obj as? [Any] {
-                for (i, v) in arr.prefix(10).enumerated() { scan(v, path: "\(path)[\(i)]") }
+            } else {
+                gameConfigData[key] = String(describing: v).prefix(80).description
             }
         }
-        scan(dict, path: "")
     }
 
     func debugDump() -> String {
         var L: [String] = []
-        L.append("=== XRD DUMP v8 ===")
+        L.append("=== XRD DUMP v9 ===")
 
         L.append("")
         L.append("-- APP --")
@@ -391,15 +397,38 @@ class XRDOverlay: NSObject {
         let ni = NetworkInterceptor.shared
         L.append("Net.server: \(ni.bestServerURL ?? "none")")
         L.append("Net.captured: \(ni.capturedServerURL ?? "none")")
+        L.append("Net.bsd: \(ni.bsdCapturedServer ?? "none")")
         L.append("Net.manual: \(ni.manualServerURL ?? "none")")
         L.append("Net.saved: \(ni.savedServerURL ?? "none")")
         L.append("Net.hasServer: \(ni.hasServer)")
         L.append("Net.intercepted: \(ni.interceptedCount)")
         L.append("Net.apiEndpoint: \(ni.discoveredAPIEndpoint ?? "none")")
         L.append("Net.urlLog(\(ni.capturedURLLog.count)):")
-        for u in ni.capturedURLLog.suffix(20) { L.append("  \(u)") }
+        for u in ni.capturedURLLog.suffix(15) { L.append("  \(u)") }
         L.append("Net.wsLog(\(ni.capturedWSLog.count)):")
         for w in ni.capturedWSLog { L.append("  \(w)") }
+
+        L.append("")
+        L.append("-- BSD HOOKS --")
+        let bsdHookClass = NSClassFromString("XRDBSDHook")
+        L.append("BSD.active: \(bsdHookClass != nil)")
+        if let cls = bsdHookClass {
+            let syncSel = NSSelectorFromString("syncToDefaults")
+            if (cls as AnyObject).responds(to: syncSel) {
+                _ = (cls as AnyObject).perform(syncSel)
+            }
+        }
+        let bsdConns = UserDefaults.standard.stringArray(forKey: "XRD_bsdConns") ?? []
+        let bsdDNS = UserDefaults.standard.stringArray(forKey: "XRD_bsdDNS") ?? []
+        let bsdServer = UserDefaults.standard.string(forKey: "XRD_bsdServer")
+        L.append("BSD.server: \(bsdServer ?? "none")")
+        L.append("BSD.dns(\(bsdDNS.count)):")
+        for d in bsdDNS.suffix(30) { L.append("  \(d)") }
+        L.append("BSD.conns(\(bsdConns.count)):")
+        for c in bsdConns.suffix(40) { L.append("  \(c)") }
+
+        L.append("")
+        L.append("-- FEATURES --")
         L.append("Bots: running=\(botEngine.isRunning) alive=\(botEngine.totalAlive)")
         L.append("Macro: on=\(settings.isMacroEnabled) power=\(settings.macroPower)")
 

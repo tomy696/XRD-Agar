@@ -39,11 +39,11 @@ class NetworkInterceptor: NSObject {
     private(set) var manualServerURL: String?
 
     var hasServer: Bool {
-        capturedServerURL != nil || savedServerURL != nil || manualServerURL != nil
+        capturedServerURL != nil || savedServerURL != nil || manualServerURL != nil || bsdCapturedServer != nil
     }
 
     var bestServerURL: String? {
-        capturedServerURL ?? manualServerURL ?? savedServerURL
+        capturedServerURL ?? bsdCapturedServer ?? manualServerURL ?? savedServerURL
     }
 
     var hasGameWS: Bool {
@@ -72,9 +72,15 @@ class NetworkInterceptor: NSObject {
         ws.send(.data(Data([17]))) { _ in }
     }
 
+    private(set) var bsdCapturedServer: String?
+
     func install() {
         guard !installed else { return }
         installed = true
+
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(handleBSDConnection(_:)),
+            name: NSNotification.Name("XRDBSDConnection"), object: nil)
 
         let dataTaskSel = NSSelectorFromString("dataTaskWithRequest:completionHandler:")
         let swizzledDataSel = NSSelectorFromString("xrd_dataTaskWithRequest:completionHandler:")
@@ -102,6 +108,17 @@ class NetworkInterceptor: NSObject {
         if let orig = class_getInstanceMethod(URLSession.self, wsProtoSel),
            let swiz = class_getInstanceMethod(URLSession.self, swizzledWsProtoSel) {
             method_exchangeImplementations(orig, swiz)
+        }
+    }
+
+    @objc private func handleBSDConnection(_ notif: Notification) {
+        guard let info = notif.userInfo,
+              let url = info["url"] as? String else { return }
+        bsdCapturedServer = url
+        if capturedServerURL == nil {
+            capturedServerURL = url
+            savedServerURL = url
+            NotificationCenter.default.post(name: .xrdServerCaptured, object: nil)
         }
     }
 

@@ -19,6 +19,12 @@ class ServerResolver {
             return
         }
 
+        if let bsdServer = UserDefaults.standard.string(forKey: "XRD_bsdServer"),
+           !bsdServer.isEmpty {
+            completion(.success(ServerInfo(url: bsdServer, token: partyCode)))
+            return
+        }
+
         guard let endpointStr = interceptor.discoveredAPIEndpoint,
               let endpoint = URL(string: endpointStr) else {
             completion(.failure(ServerError.noServer))
