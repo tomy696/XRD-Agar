@@ -49,11 +49,6 @@ class XRDOverlay: NSObject {
 
             self.jsBridge.onConnected = { [weak self] in
                 guard let self = self else { return }
-                if !self.zoomEngine.isNativeGame {
-                    self.zoomEngine.activeMethod = .jsHook
-                    self.zoomEngine.statusText = "JS zoom active"
-                }
-                self.zoomEngine.debugInfo = self.jsBridge.statusInfo
                 if self.settings.isMacroEnabled {
                     let ms = Int(self.settings.feedInterval * 1000)
                     self.jsBridge.setFeedInterval(ms)
@@ -401,6 +396,9 @@ class ZoomEngine: NSObject, ObservableObject {
         gameWindow = window
         gameView = findGameView(in: window)
         if gameView == nil {
+            gameView = findGameViewAnywhere(in: window)
+        }
+        if gameView == nil {
             gameView = window.rootViewController?.view
         }
         if let gv = gameView {
@@ -412,43 +410,17 @@ class ZoomEngine: NSObject, ObservableObject {
             isNativeGame = nativeHints.contains(where: { viewName.localizedCaseInsensitiveContains($0) })
         }
 
-        if tryCppHooks() {
-            activeMethod = .engineHook
-            statusText = "Engine hook active"
-            return
-        }
-        if tryObjCHooks() {
-            activeMethod = .objcHook
-            statusText = "ObjC hook active"
-            return
-        }
+        _ = tryCppHooks()
+        _ = tryObjCHooks()
 
         activeMethod = .displayZoom
-        statusText = "Display zoom"
-
-        let classes = scanEngineClasses()
-        if !classes.isEmpty {
-            debugInfo += " [" + classes.prefix(4).joined(separator: ",") + "]"
-        }
+        statusText = "Display zoom (\(debugInfo))"
     }
 
     func setZoom(_ factor: CGFloat) {
         currentZoom = factor
-        if let scale = engineSetScale {
-            scale(Float(factor))
-        } else if !isNativeGame, let bridge = jsBridge, bridge.isConnected {
-            bridge.setZoom(factor)
-            if activeMethod != .jsHook {
-                activeMethod = .jsHook
-                statusText = "JS zoom active"
-            }
-        } else {
-            applyDisplayZoom(factor)
-            if activeMethod != .displayZoom {
-                activeMethod = .displayZoom
-                statusText = "Display zoom"
-            }
-        }
+        engineSetScale?(Float(factor))
+        applyDisplayZoom(factor)
     }
 
     func reset() { setZoom(1.0) }
@@ -598,12 +570,19 @@ class ZoomEngine: NSObject, ObservableObject {
     // MARK: - Game view detection
 
     private func findGameView(in window: UIWindow) -> UIView? {
-        guard let root = window.rootViewController?.view else { return nil }
         let hints = ["CCGLView", "CCGL", "CCEAGL", "CCMetal", "CCRender",
                      "MTKView", "GLKView", "EAGLView", "MetalView",
                      "OpenGL", "Cocos", "cocos"]
-        if let found = findByClass(root, hints: hints) { return found }
-        return findBiggestOpaque(root)
+        if let root = window.rootViewController?.view,
+           let found = findByClass(root, hints: hints) { return found }
+        if let found = findByClass(window, hints: hints) { return found }
+        if let root = window.rootViewController?.view { return findBiggestOpaque(root) }
+        return findBiggestOpaque(window)
+    }
+
+    private func findGameViewAnywhere(in window: UIWindow) -> UIView? {
+        let hints = ["CCGLView", "CCGL", "CCEAGL", "CCMetal"]
+        return findByClass(window, hints: hints)
     }
 
     private func findByClass(_ view: UIView, hints: [String]) -> UIView? {
