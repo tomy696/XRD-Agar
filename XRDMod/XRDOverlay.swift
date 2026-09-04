@@ -429,18 +429,12 @@ class ZoomEngine: ObservableObject {
     // MARK: - Class scan (debug)
 
     private func scanEngineClasses() -> [String] {
-        var count: UInt32 = 0
-        guard let list = objc_copyClassList(&count) else { return [] }
-        defer { free(list) }
-        let hints = ["cocos", "eagl", "director", "glview", "metalview"]
-        var found: [String] = []
-        for i in 0..<Int(count) {
-            let name = String(cString: class_getName(list[i]))
-            if hints.contains(where: { name.lowercased().contains($0) }) {
-                found.append(name)
-            }
-        }
-        return found
+        let candidates = [
+            "CCDirector", "CCEAGLView", "CCMetalView", "CCGLView",
+            "Director", "EAGLView", "MetalView", "GLView",
+            "CCDirectorCaller", "AppController", "RootViewController"
+        ]
+        return candidates.filter { NSClassFromString($0) != nil }
     }
 
     // MARK: - Game view detection
