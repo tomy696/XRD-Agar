@@ -13,6 +13,7 @@ class XRDOverlay: NSObject {
     private var container: XRDPassthroughView?
     private var toggleBtn: ToggleButton?
     private var macroBtn: MacroButton?
+    private var macroDragHandle: MacroDragHandle?
     private var menuHosting: UIHostingController<AnyView>?
     private var licenseHosting: UIHostingController<AnyView>?
     private var isMenuVisible = false
@@ -176,17 +177,36 @@ class XRDOverlay: NSObject {
         ensureContainer()
         guard let c = container else { return }
         macroBtn?.removeFromSuperview()
+        macroDragHandle?.removeFromSuperview()
+
         let size = CGFloat(settings.macroButtonSize)
         let btn = MacroButton(frame: CGRect(x: 50, y: c.bounds.height - size - 50, width: size, height: size))
         btn.autoresizingMask = [.flexibleTopMargin, .flexibleRightMargin]
         c.addSubview(btn)
         macroBtn = btn
+
+        let handleSize: CGFloat = 24
+        let handle = MacroDragHandle(frame: CGRect(
+            x: btn.frame.maxX + 4,
+            y: btn.frame.midY - handleSize / 2,
+            width: handleSize,
+            height: handleSize
+        ))
+        handle.onDrag = { [weak self] delta in
+            guard let btn = self?.macroBtn, let h = self?.macroDragHandle else { return }
+            btn.center = CGPoint(x: btn.center.x + delta.x, y: btn.center.y + delta.y)
+            h.center = CGPoint(x: h.center.x + delta.x, y: h.center.y + delta.y)
+        }
+        c.addSubview(handle)
+        macroDragHandle = handle
     }
 
     private func removeMacroButton() {
         stopFeedTimer()
         macroBtn?.removeFromSuperview()
         macroBtn = nil
+        macroDragHandle?.removeFromSuperview()
+        macroDragHandle = nil
     }
 
     private func updateMacroSize(_ size: CGFloat) {
@@ -197,6 +217,7 @@ class XRDOverlay: NSObject {
         btn.center = CGPoint(x: cx, y: cy)
         btn.layer.cornerRadius = size / 2
         btn.setNeedsDisplay()
+        macroDragHandle?.center = CGPoint(x: btn.frame.maxX + 4 + 12, y: cy)
     }
 
     // MARK: - Menu
@@ -265,6 +286,7 @@ class ZoomEngine: ObservableObject {
     private var originalFrame: CGRect = .zero
 
     private var engineSetScale: ((Float) -> Void)?
+    private var zoomTimer: Timer?
 
     func setup(window: UIWindow) {
         gameWindow = window
@@ -408,22 +430,26 @@ class ZoomEngine: ObservableObject {
     private func applyDisplayZoom(_ factor: CGFloat) {
         guard let view = gameView else { return }
 
+        zoomTimer?.invalidate()
+        zoomTimer = nil
+
         if abs(factor - 1.0) < 0.01 {
             view.transform = .identity
-            view.frame = originalFrame
             return
         }
 
-        view.transform = .identity
-        let newW = originalFrame.width / factor
-        let newH = originalFrame.height / factor
-        view.frame = CGRect(
-            x: originalFrame.midX - newW / 2,
-            y: originalFrame.midY - newH / 2,
-            width: newW,
-            height: newH
-        )
         view.transform = CGAffineTransform(scaleX: factor, y: factor)
+
+        zoomTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self, weak view] _ in
+            guard let self = self, let view = view else { return }
+            if abs(self.currentZoom - 1.0) < 0.01 {
+                view.transform = .identity
+                self.zoomTimer?.invalidate()
+                self.zoomTimer = nil
+            } else {
+                view.transform = CGAffineTransform(scaleX: self.currentZoom, y: self.currentZoom)
+            }
+        }
     }
 
     // MARK: - Class scan (debug)
@@ -538,7 +564,7 @@ class ToggleButton: UIView {
     }
 }
 
-// MARK: - Macro Button (draggable indicator)
+// MARK: - Macro Button (FEED indicator, not draggable)
 
 class MacroButton: UIView {
     override init(frame: CGRect) {
@@ -547,6 +573,7 @@ class MacroButton: UIView {
         backgroundColor = .clear
         layer.cornerRadius = frame.width / 2
         clipsToBounds = true
+        isUserInteractionEnabled = false
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -554,36 +581,61 @@ class MacroButton: UIView {
     override func draw(_ rect: CGRect) {
         guard let ctx = UIGraphicsGetCurrentContext() else { return }
 
-        ctx.setFillColor(UIColor(white: 0.18, alpha: 0.55).cgColor)
+        ctx.setFillColor(UIColor(red: 0.1, green: 0.5, blue: 0.2, alpha: 0.6).cgColor)
         ctx.fillEllipse(in: bounds.insetBy(dx: 1, dy: 1))
 
-        let green = UIColor(red: 0.2, green: 0.85, blue: 0.4, alpha: 0.7)
+        let green = UIColor(red: 0.2, green: 0.85, blue: 0.4, alpha: 0.8)
         ctx.setStrokeColor(green.cgColor)
-        ctx.setLineWidth(1.5)
+        ctx.setLineWidth(2)
         ctx.strokeEllipse(in: bounds.insetBy(dx: 1, dy: 1))
 
         let c = CGPoint(x: bounds.midX, y: bounds.midY)
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: UIFont.systemFont(ofSize: 14, weight: .black),
-            .foregroundColor: UIColor.white.withAlphaComponent(0.9)
+            .font: UIFont.systemFont(ofSize: 11, weight: .black),
+            .foregroundColor: UIColor.white
         ]
-        let text = "M"
+        let text = "FEED"
         let size = (text as NSString).size(withAttributes: attrs)
         (text as NSString).draw(
             at: CGPoint(x: c.x - size.width / 2, y: c.y - size.height / 2),
             withAttributes: attrs
         )
     }
+}
 
-    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        UIView.animate(withDuration: 0.1) { self.alpha = 0.7 }
+// MARK: - Macro Drag Handle (moves the FEED button)
+
+class MacroDragHandle: UIView {
+    var onDrag: ((CGPoint) -> Void)?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = UIColor.white.withAlphaComponent(0.15)
+        layer.cornerRadius = frame.width / 2
+        layer.borderWidth = 1
+        layer.borderColor = UIColor.white.withAlphaComponent(0.3).cgColor
+
+        let icon = UILabel(frame: bounds)
+        icon.text = "✥"
+        icon.font = .systemFont(ofSize: 13)
+        icon.textColor = UIColor.white.withAlphaComponent(0.6)
+        icon.textAlignment = .center
+        icon.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        addSubview(icon)
     }
+
+    required init?(coder: NSCoder) { fatalError() }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let t = touches.first else { return }
         let loc = t.location(in: superview)
         let prev = t.previousLocation(in: superview)
-        center = CGPoint(x: center.x + loc.x - prev.x, y: center.y + loc.y - prev.y)
+        let delta = CGPoint(x: loc.x - prev.x, y: loc.y - prev.y)
+        onDrag?(delta)
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        UIView.animate(withDuration: 0.1) { self.alpha = 0.5 }
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
