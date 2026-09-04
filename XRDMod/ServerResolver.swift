@@ -74,11 +74,11 @@ class ServerResolver {
                 resolvedHostname = String(format: domainTemplate, gameRegions[0])
             }
 
-            if let bsdClass = NSClassFromString("XRDBSDHook") {
-                let sel = NSSelectorFromString("setDNSOverride:")
-                if bsdClass.responds(to: sel) {
-                    _ = bsdClass.perform(sel, with: ["host": resolvedHostname, "ip": cleanIP])
-                }
+            if let bsdClass = NSClassFromString("XRDBSDHook"),
+               let method = class_getClassMethod(bsdClass, NSSelectorFromString("setDNSOverride:")) {
+                typealias F = @convention(c) (AnyObject, Selector, NSDictionary) -> Void
+                let fn = unsafeBitCast(method_getImplementation(method), to: F.self)
+                fn(bsdClass, NSSelectorFromString("setDNSOverride:"), ["host": resolvedHostname, "ip": cleanIP] as NSDictionary)
             }
 
             completion("wss://\(resolvedHostname):\(port)")
