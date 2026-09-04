@@ -59,12 +59,6 @@ class AgarBot: Identifiable {
             return
         }
 
-        let tlsOptions = NWProtocolTLS.Options()
-        sec_protocol_options_set_tls_server_name(tlsOptions.securityProtocolOptions, serverHostname)
-        sec_protocol_options_set_verify_block(tlsOptions.securityProtocolOptions, { _, _, completionHandler in
-            completionHandler(true)
-        }, DispatchQueue.main)
-
         let wsOptions = NWProtocolWebSocket.Options()
         wsOptions.autoReplyPing = true
         wsOptions.setAdditionalHeaders([
@@ -72,7 +66,7 @@ class AgarBot: Identifiable {
             ("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)")
         ])
 
-        let params = NWParameters(tls: tlsOptions)
+        let params = NWParameters.tcp
         params.defaultProtocolStack.applicationProtocols.insert(wsOptions, at: 0)
 
         let conn = NWConnection(host: host, port: port, using: params)
