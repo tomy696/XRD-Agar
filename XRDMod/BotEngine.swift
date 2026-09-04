@@ -90,7 +90,9 @@ class BotEngine: ObservableObject {
 
                 let bot = AgarBot(
                     name: names[i % names.count],
-                    serverURL: serverInfo.url,
+                    serverIP: serverInfo.ip,
+                    serverPort: serverInfo.port,
+                    serverHostname: serverInfo.hostname,
                     serverToken: serverInfo.token,
                     action: config.botAction
                 )

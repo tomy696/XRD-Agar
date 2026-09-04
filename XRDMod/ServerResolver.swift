@@ -5,6 +5,9 @@ class ServerResolver {
     struct ServerInfo {
         let url: String
         let token: String
+        let ip: String
+        let port: Int
+        let hostname: String
     }
 
     private static let gameRegions = [
@@ -16,7 +19,7 @@ class ServerResolver {
 
     private static let domainTemplate = "%@.mobile-live-v26.agario.miniclippt.com"
 
-    static func resolveHostname(forIP ip: String, port: Int, completion: @escaping (String) -> Void) {
+    static func resolveHostname(forIP ip: String, port: Int, completion: @escaping (String, String) -> Void) {
         let cleanIP = ip.hasPrefix("::ffff:") ? String(ip.dropFirst(7)) : ip
         let ipParts = cleanIP.split(separator: ".")
         let group = DispatchGroup()
@@ -74,14 +77,7 @@ class ServerResolver {
                 resolvedHostname = String(format: domainTemplate, gameRegions[0])
             }
 
-            if let bsdClass = NSClassFromString("XRDBSDHook"),
-               let method = class_getClassMethod(bsdClass, NSSelectorFromString("setDNSOverride:")) {
-                typealias F = @convention(c) (AnyObject, Selector, NSDictionary) -> Void
-                let fn = unsafeBitCast(method_getImplementation(method), to: F.self)
-                fn(bsdClass, NSSelectorFromString("setDNSOverride:"), ["host": resolvedHostname, "ip": cleanIP] as NSDictionary)
-            }
-
-            completion("wss://\(resolvedHostname):\(port)")
+            completion(resolvedHostname, "wss://\(resolvedHostname):\(port)")
         }
     }
 
@@ -95,19 +91,28 @@ class ServerResolver {
             let token = interceptor.capturedToken ?? partyCode
 
             if let ip = interceptor.capturedServerIP, let port = interceptor.capturedServerPort {
-                resolveHostname(forIP: ip, port: port) { resolvedURL in
-                    completion(.success(ServerInfo(url: resolvedURL, token: token)))
+                resolveHostname(forIP: ip, port: port) { hostname, resolvedURL in
+                    completion(.success(ServerInfo(url: resolvedURL, token: token, ip: ip, port: port, hostname: hostname)))
                 }
                 return
             }
 
-            completion(.success(ServerInfo(url: wsURL, token: token)))
+            let fallbackHost = String(format: domainTemplate, gameRegions[0])
+            if let parsed = URLComponents(string: wsURL), let host = parsed.host {
+                let p = parsed.port ?? 443
+                completion(.success(ServerInfo(url: wsURL, token: token, ip: host, port: p, hostname: host)))
+            } else {
+                completion(.success(ServerInfo(url: wsURL, token: token, ip: fallbackHost, port: 443, hostname: fallbackHost)))
+            }
             return
         }
 
         if let bsdServer = UserDefaults.standard.string(forKey: "XRD_bsdServer"),
-           !bsdServer.isEmpty {
-            completion(.success(ServerInfo(url: bsdServer, token: partyCode)))
+           !bsdServer.isEmpty,
+           let parsed = URLComponents(string: bsdServer), let host = parsed.host {
+            let p = parsed.port ?? 443
+            let h = String(format: domainTemplate, gameRegions[0])
+            completion(.success(ServerInfo(url: bsdServer, token: partyCode, ip: host, port: p, hostname: h)))
             return
         }
 
@@ -168,7 +173,12 @@ class ServerResolver {
 
             let token = (json["token"] as? String) ?? ""
             let wsURL = server.hasPrefix("wss://") ? server : "wss://\(server)"
-            completion(.success(ServerInfo(url: wsURL, token: token)))
+            if let parsed = URLComponents(string: wsURL), let host = parsed.host {
+                let p = parsed.port ?? 443
+                completion(.success(ServerInfo(url: wsURL, token: token, ip: host, port: p, hostname: host)))
+            } else {
+                completion(.failure(ServerError.invalidResponse))
+            }
         }.resume()
     }
 

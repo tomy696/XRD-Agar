@@ -391,7 +391,7 @@ class XRDOverlay: NSObject {
 
     func debugDump() -> String {
         var L: [String] = []
-        L.append("=== XRD DUMP v15 ===")
+        L.append("=== XRD DUMP v16 ===")
 
         L.append("")
         L.append("-- APP --")

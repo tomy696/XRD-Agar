@@ -1,4 +1,5 @@
 import Foundation
+import Network
 
 protocol AgarBotDelegate: AnyObject {
     func bot(_ bot: AgarBot, didUpdateState state: AgarBot.State)
@@ -7,10 +8,12 @@ protocol AgarBotDelegate: AnyObject {
     func botDidDisconnect(_ bot: AgarBot)
 }
 
-class AgarBot: NSObject, Identifiable {
+class AgarBot: Identifiable {
     let id = UUID()
     let name: String
-    let serverURL: String
+    let serverIP: String
+    let serverPort: Int
+    let serverHostname: String
     let serverToken: String
     let action: BotAction
     var targetUID: String = ""
@@ -25,8 +28,7 @@ class AgarBot: NSObject, Identifiable {
         didSet { delegate?.bot(self, didUpdateState: state) }
     }
 
-    private var webSocket: URLSessionWebSocketTask?
-    private var session: URLSession?
+    private var connection: NWConnection?
     private var targetPosition: (x: Double, y: Double)?
     private var ownIDs: [UInt32] = []
     private var cells: [UInt32: CellUpdate] = [:]
@@ -35,12 +37,13 @@ class AgarBot: NSObject, Identifiable {
     private var isAlive: Bool = false
     private var respawnCount: Int = 0
 
-    init(name: String, serverURL: String, serverToken: String, action: BotAction) {
+    init(name: String, serverIP: String, serverPort: Int, serverHostname: String, serverToken: String, action: BotAction) {
         self.name = name
-        self.serverURL = serverURL
+        self.serverIP = serverIP
+        self.serverPort = serverPort
+        self.serverHostname = serverHostname
         self.serverToken = serverToken
         self.action = action
-        super.init()
     }
 
     private(set) var lastError: String = ""
@@ -48,34 +51,62 @@ class AgarBot: NSObject, Identifiable {
     func connect() {
         state = .connecting
         lastError = ""
-        let config = URLSessionConfiguration.default
-        config.httpAdditionalHeaders = [
-            "Origin": "https://agar.io",
-            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)"
-        ]
-        session = URLSession(configuration: config, delegate: self, delegateQueue: .main)
-        if let s = session { NetworkInterceptor.shared.botSessions.add(s) }
 
-        guard let url = URL(string: serverURL) else {
-            lastError = "Bad URL"
+        guard let host = NWEndpoint.Host(serverIP) as NWEndpoint.Host?,
+              let port = NWEndpoint.Port(rawValue: UInt16(serverPort)) else {
+            lastError = "Bad IP/port"
             state = .disconnected
             return
         }
 
-        webSocket = session?.webSocketTask(with: url)
-        webSocket?.resume()
-        receiveLoop()
+        let tlsOptions = NWProtocolTLS.Options()
+        sec_protocol_options_set_tls_server_name(tlsOptions.securityProtocolOptions, serverHostname)
+        sec_protocol_options_set_verify_block(tlsOptions.securityProtocolOptions, { _, _, completionHandler in
+            completionHandler(true)
+        }, DispatchQueue.main)
+
+        let wsOptions = NWProtocolWebSocket.Options()
+        wsOptions.autoReplyPing = true
+        wsOptions.setAdditionalHeaders([
+            ("Origin", "https://agar.io"),
+            ("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)")
+        ])
+
+        let params = NWParameters(tls: tlsOptions)
+        params.defaultProtocolStack.applicationProtocols.insert(wsOptions, at: 0)
+
+        let conn = NWConnection(host: host, port: port, using: params)
+        self.connection = conn
+
+        conn.stateUpdateHandler = { [weak self] newState in
+            guard let self = self else { return }
+            switch newState {
+            case .ready:
+                self.state = .connected
+                self.sendHandshake()
+                self.receiveLoop()
+            case .failed(let error):
+                self.lastError = error.localizedDescription
+                self.disconnect()
+            case .waiting(let error):
+                self.lastError = "Waiting: \(error.localizedDescription)"
+            default:
+                break
+            }
+        }
+
+        conn.start(queue: .main)
     }
 
     func disconnect() {
         moveTimer?.invalidate()
         moveTimer = nil
-        webSocket?.cancel(with: .goingAway, reason: nil)
-        webSocket = nil
-        session?.invalidateAndCancel()
-        session = nil
-        state = .disconnected
-        delegate?.botDidDisconnect(self)
+        connection?.cancel()
+        connection = nil
+        if state != .disconnected {
+            state = .disconnected
+            delegate?.botDidDisconnect(self)
+        }
     }
 
     func setTarget(x: Double, y: Double) {
@@ -100,21 +131,25 @@ class AgarBot: NSObject, Identifiable {
     }
 
     private func sendBinary(_ data: Data) {
-        webSocket?.send(.data(data)) { _ in }
+        let metadata = NWProtocolWebSocket.Metadata(opcode: .binary)
+        let context = NWConnection.ContentContext(identifier: "ws", metadata: [metadata])
+        connection?.send(content: data, contentContext: context, isComplete: true, completion: .contentProcessed({ _ in }))
     }
 
     private func receiveLoop() {
-        webSocket?.receive { [weak self] result in
+        connection?.receiveMessage { [weak self] data, context, _, error in
             guard let self = self else { return }
-            switch result {
-            case .success(let message):
-                if case .data(let data) = message {
-                    self.handlePacket(data)
-                }
-                self.receiveLoop()
-            case .failure:
+            if let error = error {
+                self.lastError = error.localizedDescription
                 self.disconnect()
+                return
             }
+            if let data = data, !data.isEmpty,
+               let metadata = context?.protocolMetadata(definition: NWProtocolWebSocket.definition) as? NWProtocolWebSocket.Metadata,
+               metadata.opcode == .binary {
+                self.handlePacket(data)
+            }
+            self.receiveLoop()
         }
     }
 
@@ -237,37 +272,6 @@ class AgarBot: NSObject, Identifiable {
         respawnCount += 1
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             self?.spawn()
-        }
-    }
-}
-
-extension AgarBot: URLSessionWebSocketDelegate {
-    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
-                    didOpenWithProtocol protocol: String?) {
-        state = .connected
-        sendHandshake()
-    }
-
-    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
-                    didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
-        lastError = "Closed: \(closeCode.rawValue)"
-        disconnect()
-    }
-
-    func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge,
-                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
-        if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
-           let trust = challenge.protectionSpace.serverTrust {
-            completionHandler(.useCredential, URLCredential(trust: trust))
-        } else {
-            completionHandler(.performDefaultHandling, nil)
-        }
-    }
-
-    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        if let error = error {
-            lastError = String(error.localizedDescription.prefix(60))
-            disconnect()
         }
     }
 }
