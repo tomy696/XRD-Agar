@@ -21,6 +21,7 @@
 static NSMutableArray<NSString *> *g_conns;
 static NSMutableArray<NSString *> *g_dns;
 static NSMutableDictionary<NSString *, NSString *> *g_dnsMap;
+static NSMutableDictionary<NSString *, NSString *> *g_dnsOverrides;
 static BOOL g_ready = NO;
 
 static NSMutableArray<NSString *> *g_candidates;
@@ -34,6 +35,7 @@ static void bsd_hook_init(void) {
     g_conns = [NSMutableArray new];
     g_dns = [NSMutableArray new];
     g_dnsMap = [NSMutableDictionary new];
+    g_dnsOverrides = [NSMutableDictionary new];
     g_candidates = [NSMutableArray new];
     g_ready = YES;
 }
@@ -146,39 +148,65 @@ int xrd_getaddrinfo(const char *node, const char *service,
                      const struct addrinfo *hints, struct addrinfo **res) {
     int ret = getaddrinfo(node, service, hints, res);
 
-    if (g_ready && ret == 0 && node && res && *res) {
+    if (g_ready && node) {
         NSString *host = @(node);
-        struct addrinfo *rp = *res;
-        while (rp) {
-            if (rp->ai_addr) {
-                char ip[INET6_ADDRSTRLEN] = {0};
-                if (rp->ai_family == AF_INET) {
+
+        NSString *overrideIP = nil;
+        @synchronized(g_dnsOverrides) {
+            overrideIP = [g_dnsOverrides[host] copy];
+        }
+
+        if (overrideIP && ret == 0 && res && *res) {
+            struct addrinfo *rp = *res;
+            while (rp) {
+                if (rp->ai_addr && rp->ai_family == AF_INET) {
                     struct sockaddr_in *sin = (struct sockaddr_in *)rp->ai_addr;
-                    inet_ntop(AF_INET, &sin->sin_addr, ip, sizeof(ip));
-                } else if (rp->ai_family == AF_INET6) {
-                    struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)rp->ai_addr;
-                    inet_ntop(AF_INET6, &sin6->sin6_addr, ip, sizeof(ip));
-                }
+                    inet_pton(AF_INET, [overrideIP UTF8String], &sin->sin_addr);
 
-                if (ip[0] != '\0') {
-                    NSString *ipStr = @(ip);
-                    @synchronized(g_dnsMap) {
-                        g_dnsMap[ipStr] = host;
-                    }
-
-                    NSString *dnsEntry = [NSString stringWithFormat:@"%@ -> %@", host, ipStr];
+                    NSString *dnsEntry = [NSString stringWithFormat:@"%@ -> %@ (override)", host, overrideIP];
                     dispatch_async(dispatch_get_main_queue(), ^{
                         if (g_dns.count >= 200) [g_dns removeObjectAtIndex:0];
                         [g_dns addObject:dnsEntry];
-
-                        if (g_dns.count % 5 == 0) {
-                            [[NSUserDefaults standardUserDefaults] setObject:[g_dns copy] forKey:kDNSKey];
-                        }
                     });
                     break;
                 }
+                rp = rp->ai_next;
             }
-            rp = rp->ai_next;
+        }
+
+        if (ret == 0 && res && *res) {
+            struct addrinfo *rp = *res;
+            while (rp) {
+                if (rp->ai_addr) {
+                    char ip[INET6_ADDRSTRLEN] = {0};
+                    if (rp->ai_family == AF_INET) {
+                        struct sockaddr_in *sin = (struct sockaddr_in *)rp->ai_addr;
+                        inet_ntop(AF_INET, &sin->sin_addr, ip, sizeof(ip));
+                    } else if (rp->ai_family == AF_INET6) {
+                        struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)rp->ai_addr;
+                        inet_ntop(AF_INET6, &sin6->sin6_addr, ip, sizeof(ip));
+                    }
+
+                    if (ip[0] != '\0') {
+                        NSString *ipStr = @(ip);
+                        @synchronized(g_dnsMap) {
+                            g_dnsMap[ipStr] = host;
+                        }
+
+                        NSString *dnsEntry = [NSString stringWithFormat:@"%@ -> %@", host, ipStr];
+                        dispatch_async(dispatch_get_main_queue(), ^{
+                            if (g_dns.count >= 200) [g_dns removeObjectAtIndex:0];
+                            [g_dns addObject:dnsEntry];
+
+                            if (g_dns.count % 5 == 0) {
+                                [[NSUserDefaults standardUserDefaults] setObject:[g_dns copy] forKey:kDNSKey];
+                            }
+                        });
+                        break;
+                    }
+                }
+                rp = rp->ai_next;
+            }
         }
     }
 
@@ -215,6 +243,18 @@ DYLD_INTERPOSE(xrd_getaddrinfo, getaddrinfo)
     [[NSUserDefaults standardUserDefaults] setObject:[g_conns copy] forKey:kConnsKey];
     [[NSUserDefaults standardUserDefaults] setObject:[g_dns copy] forKey:kDNSKey];
     [[NSUserDefaults standardUserDefaults] setObject:[g_candidates copy] forKey:kCandidatesKey];
+}
+
++ (void)setDNSOverride:(NSString *)hostname ip:(NSString *)ip {
+    @synchronized(g_dnsOverrides) {
+        g_dnsOverrides[hostname] = ip;
+    }
+}
+
++ (void)clearDNSOverrides {
+    @synchronized(g_dnsOverrides) {
+        [g_dnsOverrides removeAllObjects];
+    }
 }
 
 @end

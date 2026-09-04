@@ -65,14 +65,23 @@ class ServerResolver {
         }
 
         group.notify(queue: .main) {
+            let resolvedHostname: String
             if let hostname = matchedHostname {
-                completion("wss://\(hostname):\(port)")
+                resolvedHostname = hostname
             } else if let hostname = subnetHostname {
-                completion("wss://\(hostname):\(port)")
+                resolvedHostname = hostname
             } else {
-                let fallback = String(format: domainTemplate, gameRegions[0])
-                completion("wss://\(fallback):\(port)")
+                resolvedHostname = String(format: domainTemplate, gameRegions[0])
             }
+
+            if let bsdClass = NSClassFromString("XRDBSDHook") {
+                let sel = NSSelectorFromString("setDNSOverride:ip:")
+                if bsdClass.responds(to: sel) {
+                    _ = bsdClass.perform(sel, with: resolvedHostname, with: cleanIP)
+                }
+            }
+
+            completion("wss://\(resolvedHostname):\(port)")
         }
     }
 
