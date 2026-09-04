@@ -335,10 +335,30 @@ struct ModMenuView: View {
                 sectionHeader("DEBUG")
                 infoRow("License", settings.isLicenseValid ? "Active" : "Inactive")
                 infoRow("WS", NetworkInterceptor.shared.gameWebSocket != nil ? "Captured" : "None")
+                infoRow("JS", XRDOverlay.shared.jsBridge.isConnected ? "Connected" : XRDOverlay.shared.jsBridge.statusInfo)
+                infoRow("Zoom", XRDOverlay.shared.zoomEngine.activeMethod.rawValue)
                 infoRow("Intercepted", "\(NetworkInterceptor.shared.interceptedCount)")
-                infoRow("Mass", "\(settings.ownMass)")
             }
             .sectionStyle()
+
+            Button(action: {
+                let dump = XRDOverlay.shared.debugDump()
+                UIPasteboard.general.string = dump
+                debugCopied = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { debugCopied = false }
+            }) {
+                HStack(spacing: 4) {
+                    Image(systemName: debugCopied ? "checkmark.circle.fill" : "doc.on.doc")
+                        .font(.system(size: 10))
+                    Text(debugCopied ? "COPIED!" : "COPY DEBUG")
+                        .font(.system(size: 9, weight: .black, design: .monospaced))
+                }
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(debugCopied ? Color.green.opacity(0.7) : Color.orange.opacity(0.7))
+                .cornerRadius(6)
+            }
 
             VStack(alignment: .leading, spacing: 3) {
                 infoRow("Version", "2.0")
@@ -353,6 +373,7 @@ struct ModMenuView: View {
     // MARK: - Your UID (in Config)
 
     @State private var configCopiedUID = false
+    @State private var debugCopied = false
 
     private var uidSection: some View {
         VStack(alignment: .leading, spacing: 5) {

@@ -292,6 +292,79 @@ class XRDOverlay: NSObject {
         v.center = CGPoint(x: v.center.x + t.x, y: v.center.y + t.y)
         g.setTranslation(.zero, in: v.superview)
     }
+
+    func debugDump() -> String {
+        var lines: [String] = []
+        lines.append("=== XRD DEBUG DUMP ===")
+        lines.append("Version: 2.0")
+        lines.append("")
+
+        lines.append("-- ZOOM --")
+        lines.append("Method: \(zoomEngine.activeMethod.rawValue)")
+        lines.append("Status: \(zoomEngine.statusText)")
+        lines.append("Debug: \(zoomEngine.debugInfo)")
+        lines.append("Current: \(zoomEngine.currentZoom)")
+        lines.append("")
+
+        lines.append("-- JS BRIDGE --")
+        lines.append("Connected: \(jsBridge.isConnected)")
+        lines.append("Status: \(jsBridge.statusInfo)")
+        lines.append("")
+
+        lines.append("-- NETWORK --")
+        lines.append("Server: \(NetworkInterceptor.shared.bestServerURL ?? "none")")
+        lines.append("HasServer: \(NetworkInterceptor.shared.hasServer)")
+        lines.append("HasGameWS: \(NetworkInterceptor.shared.hasGameWS)")
+        lines.append("GameWS: \(NetworkInterceptor.shared.gameWebSocket != nil ? "captured" : "nil")")
+        lines.append("Intercepted: \(NetworkInterceptor.shared.interceptedCount)")
+        lines.append("")
+
+        lines.append("-- BOTS --")
+        lines.append("Running: \(botEngine.isRunning)")
+        lines.append("Alive: \(botEngine.totalAlive)")
+        lines.append("Status: \(botEngine.statusMessage)")
+        lines.append("")
+
+        lines.append("-- MACRO --")
+        lines.append("Enabled: \(settings.isMacroEnabled)")
+        lines.append("Power: \(settings.macroPower)")
+        lines.append("Interval: \(settings.feedInterval)s")
+        lines.append("")
+
+        lines.append("-- VIEW HIERARCHY --")
+        for scene in UIApplication.shared.connectedScenes {
+            guard let ws = scene as? UIWindowScene else { continue }
+            for (wi, window) in ws.windows.enumerated() {
+                lines.append("Window[\(wi)]: \(type(of: window)) frame=\(window.frame)")
+                dumpViews(window, indent: 1, lines: &lines, depth: 0, maxDepth: 6)
+            }
+        }
+        lines.append("")
+
+        lines.append("-- OBJ-C CLASSES --")
+        let candidates = ["CCDirector", "CCEAGLView", "CCMetalView", "CCGLView",
+                          "Director", "EAGLView", "MetalView", "GLView",
+                          "WKWebView", "UIWebView", "WKContentView",
+                          "CCDirectorCaller", "AppController", "RootViewController",
+                          "UnityView", "UnityAppController", "MTKView", "GLKView"]
+        let found = candidates.filter { NSClassFromString($0) != nil }
+        lines.append("Found: \(found.joined(separator: ", "))")
+        lines.append("")
+        lines.append("=== END DUMP ===")
+
+        return lines.joined(separator: "\n")
+    }
+
+    private func dumpViews(_ view: UIView, indent: Int, lines: inout [String], depth: Int, maxDepth: Int) {
+        guard depth < maxDepth else { return }
+        for sub in view.subviews {
+            let pad = String(repeating: "  ", count: indent)
+            let name = String(describing: type(of: sub))
+            let extra = sub.isHidden ? " [hidden]" : ""
+            lines.append("\(pad)\(name) \(Int(sub.frame.width))x\(Int(sub.frame.height))\(extra)")
+            dumpViews(sub, indent: indent + 1, lines: &lines, depth: depth + 1, maxDepth: maxDepth)
+        }
+    }
 }
 
 // MARK: - Zoom Engine
