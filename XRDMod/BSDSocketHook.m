@@ -245,9 +245,13 @@ DYLD_INTERPOSE(xrd_getaddrinfo, getaddrinfo)
     [[NSUserDefaults standardUserDefaults] setObject:[g_candidates copy] forKey:kCandidatesKey];
 }
 
-+ (void)setDNSOverride:(NSString *)hostname ip:(NSString *)ip {
-    @synchronized(g_dnsOverrides) {
-        g_dnsOverrides[hostname] = ip;
++ (void)setDNSOverride:(NSDictionary *)info {
+    NSString *hostname = info[@"host"];
+    NSString *ip = info[@"ip"];
+    if (hostname && ip) {
+        @synchronized(g_dnsOverrides) {
+            g_dnsOverrides[hostname] = ip;
+        }
     }
 }
 

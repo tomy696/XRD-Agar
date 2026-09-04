@@ -75,9 +75,9 @@ class ServerResolver {
             }
 
             if let bsdClass = NSClassFromString("XRDBSDHook") {
-                let sel = NSSelectorFromString("setDNSOverride:ip:")
+                let sel = NSSelectorFromString("setDNSOverride:")
                 if bsdClass.responds(to: sel) {
-                    _ = bsdClass.perform(sel, with: resolvedHostname, with: cleanIP)
+                    _ = bsdClass.perform(sel, with: ["host": resolvedHostname, "ip": cleanIP])
                 }
             }
 
