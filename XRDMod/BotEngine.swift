@@ -2,14 +2,13 @@ import Foundation
 import Combine
 
 class BotEngine: ObservableObject {
-    @Published var bots: [AgarBot] = []
-    @Published var activeBotCount: Int = 0
     @Published var isRunning: Bool = false
     @Published var statusMessage: String = "Idle"
     @Published var totalSpawned: Int = 0
     @Published var totalAlive: Int = 0
 
     weak var settings: GameSettings?
+    var bots: [AgarBot] = []
 
     private var targetX: Double = 0
     private var targetY: Double = 0
@@ -17,18 +16,24 @@ class BotEngine: ObservableObject {
 
     func startBots(config: BotConfiguration) {
         guard !isRunning else { return }
-        isRunning = true
-        statusMessage = "Resolving server..."
 
-        ServerResolver.resolveServer(region: config.region, gameMode: config.gameMode, partyCode: config.partyCode) { [weak self] result in
+        guard NetworkInterceptor.shared.hasServer else {
+            statusMessage = "No server - play a game first"
+            return
+        }
+
+        isRunning = true
+        statusMessage = "Resolving..."
+
+        ServerResolver.resolveServer(partyCode: config.partyCode) { [weak self] result in
             DispatchQueue.main.async {
                 switch result {
                 case .success(let info):
-                    self?.statusMessage = "Spawning bots..."
+                    self?.statusMessage = "Spawning..."
                     self?.spawnBots(config: config, serverInfo: info)
                     self?.startUIDDetection()
                 case .failure(let error):
-                    self?.statusMessage = "Error: \(error.localizedDescription)"
+                    self?.statusMessage = error.localizedDescription
                     self?.isRunning = false
                 }
             }
@@ -40,7 +45,6 @@ class BotEngine: ObservableObject {
         uidTimer = nil
         for bot in bots { bot.disconnect() }
         bots.removeAll()
-        activeBotCount = 0
         totalAlive = 0
         totalSpawned = 0
         isRunning = false
@@ -52,12 +56,6 @@ class BotEngine: ObservableObject {
         targetY = y
         for bot in bots { bot.setTarget(x: x, y: y) }
     }
-
-    func updateTargetFromPlayer(_ player: PlayerInfo) {
-        updateTarget(x: player.x, y: player.y)
-    }
-
-    // MARK: - UID Detection
 
     private func startUIDDetection() {
         uidTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
@@ -80,24 +78,19 @@ class BotEngine: ObservableObject {
         }
     }
 
-    // MARK: - Spawning
-
     private func spawnBots(config: BotConfiguration, serverInfo: ServerResolver.ServerInfo) {
         let names = config.resolvedNames
-        let batchSize = min(config.botCount, 50)
+        let count = min(config.botCount, 50)
 
-        for i in 0..<batchSize {
-            let delay = Double(i) * 0.15
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+        for i in 0..<count {
+            DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 0.15) { [weak self] in
                 guard let self = self, self.isRunning else { return }
 
                 let bot = AgarBot(
                     name: names[i % names.count],
                     serverURL: serverInfo.url,
                     serverToken: serverInfo.token,
-                    massBoost: config.massBoost,
-                    action: config.botAction,
-                    shouldSplit: config.shouldSplit
+                    action: config.botAction
                 )
                 bot.targetUID = config.targetUID
                 bot.delegate = self
@@ -106,28 +99,13 @@ class BotEngine: ObservableObject {
 
                 self.bots.append(bot)
                 self.totalSpawned += 1
-                self.activeBotCount = self.bots.count
-                self.statusMessage = "Spawning... \(self.totalSpawned)/\(config.botCount)"
-            }
-        }
-
-        if config.botCount > 50 {
-            DispatchQueue.main.asyncAfter(deadline: .now() + Double(50) * 0.15 + 1.0) { [weak self] in
-                guard let self = self, self.isRunning else { return }
-                var remaining = config
-                remaining.botCount = config.botCount - 50
-                self.spawnBots(config: remaining, serverInfo: serverInfo)
+                self.statusMessage = "Spawning \(self.totalSpawned)/\(config.botCount)"
             }
         }
     }
 
     private func recountAlive() {
-        totalAlive = bots.filter { bot in
-            switch bot.state {
-            case .alive, .feeding: return true
-            default: return false
-            }
-        }.count
+        totalAlive = bots.filter { $0.state == .alive }.count
     }
 }
 
@@ -137,24 +115,47 @@ extension BotEngine: AgarBotDelegate {
             self?.recountAlive()
             switch state {
             case .alive:
-                self?.statusMessage = "Bots alive: \(self?.totalAlive ?? 0)"
+                self?.statusMessage = "Alive: \(self?.totalAlive ?? 0)"
             case .dead:
-                self?.statusMessage = "Bot died, respawning..."
+                self?.statusMessage = "Respawning..."
             case .disconnected:
                 self?.bots.removeAll { $0.id == bot.id }
-                self?.activeBotCount = self?.bots.count ?? 0
                 self?.recountAlive()
                 if self?.bots.isEmpty == true {
                     self?.isRunning = false
-                    self?.statusMessage = "All bots disconnected"
+                    self?.statusMessage = "All disconnected"
                 }
-            default:
-                break
+            default: break
             }
         }
     }
 
     func bot(_ bot: AgarBot, didSpawnWithIDs ids: [UInt32]) {}
-    func bot(_ bot: AgarBot, didReceiveWorldUpdate players: [CellUpdate]) {}
+
+    func bot(_ bot: AgarBot, didReceiveWorldUpdate updates: [CellUpdate]) {
+        DispatchQueue.main.async { [weak self] in
+            guard let settings = self?.settings else { return }
+            for cell in updates {
+                guard !cell.name.isEmpty, !cell.isVirus else { continue }
+                let info = PlayerInfo(
+                    id: cell.id, name: cell.name,
+                    x: Double(cell.x), y: Double(cell.y),
+                    mass: Double(cell.size) * Double(cell.size) / 100.0,
+                    color: cell.color, isVirus: false
+                )
+                if let idx = settings.currentPlayers.firstIndex(where: { $0.id == info.id }) {
+                    settings.currentPlayers[idx] = info
+                } else {
+                    settings.currentPlayers.append(info)
+                }
+            }
+            if settings.currentPlayers.count > 80 {
+                settings.currentPlayers = settings.currentPlayers
+                    .sorted { $0.mass > $1.mass }
+                    .prefix(60).map { $0 }
+            }
+        }
+    }
+
     func botDidDisconnect(_ bot: AgarBot) {}
 }

@@ -7,6 +7,7 @@ class XRDOverlay: NSObject {
 
     let settings = GameSettings()
     let botEngine = BotEngine()
+    let zoomEngine = ZoomEngine()
 
     private weak var gameWindow: UIWindow?
     private var container: XRDPassthroughView?
@@ -15,7 +16,7 @@ class XRDOverlay: NSObject {
     private var menuHosting: UIHostingController<AnyView>?
     private var licenseHosting: UIHostingController<AnyView>?
     private var isMenuVisible = false
-    private var macroTimer: Timer?
+    private var feedTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
 
     func setup() {
@@ -36,6 +37,10 @@ class XRDOverlay: NSObject {
         installContainer()
         observeLifecycle()
         setupObservers()
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            self?.zoomEngine.setup(window: mainWindow)
+        }
 
         if LicenseManager.shared.isValid {
             showOverlayUI()
@@ -65,15 +70,28 @@ class XRDOverlay: NSObject {
         if let c = container { window.bringSubviewToFront(c) }
     }
 
-    // MARK: - Observers
-
     private func setupObservers() {
         settings.$isMacroEnabled
             .dropFirst()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] enabled in
-                if enabled { self?.addMacroButton() }
-                else { self?.removeMacroButton() }
+                if enabled {
+                    self?.addMacroButton()
+                    self?.startFeedTimer()
+                } else {
+                    self?.removeMacroButton()
+                }
+            }
+            .store(in: &cancellables)
+
+        settings.$macroPower
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self = self, self.settings.isMacroEnabled else { return }
+                self.startFeedTimer()
+                self.macroBtn?.power = self.settings.macroPower
+                self.macroBtn?.setNeedsDisplay()
             }
             .store(in: &cancellables)
 
@@ -84,51 +102,32 @@ class XRDOverlay: NSObject {
                 self?.updateMacroSize(CGFloat(size))
             }
             .store(in: &cancellables)
-
-        settings.$zoomLevel
-            .dropFirst()
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] level in
-                self?.applyZoom(CGFloat(level))
-            }
-            .store(in: &cancellables)
-
-        settings.$macroDragMode
-            .dropFirst()
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] drag in
-                self?.macroBtn?.isDragMode = drag
-            }
-            .store(in: &cancellables)
     }
-
-    // MARK: - Zoom
-
-    private func applyZoom(_ scale: CGFloat) {
-        guard let window = gameWindow,
-              let rootView = window.rootViewController?.view else { return }
-        for subview in rootView.subviews where subview !== container {
-            subview.transform = CGAffineTransform(scaleX: scale, y: scale)
-        }
-    }
-
-    // MARK: - Lifecycle
 
     private func observeLifecycle() {
         NotificationCenter.default.addObserver(
             self, selector: #selector(appActivated),
             name: UIApplication.didBecomeActiveNotification, object: nil
         )
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(appActivated),
-            name: UIApplication.willEnterForegroundNotification, object: nil
-        )
     }
 
     @objc private func appActivated() {
-        DispatchQueue.main.async { [weak self] in
-            self?.ensureContainer()
+        DispatchQueue.main.async { [weak self] in self?.ensureContainer() }
+    }
+
+    // MARK: - Feed Timer
+
+    private func startFeedTimer() {
+        feedTimer?.invalidate()
+        let interval = settings.feedInterval
+        feedTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
+            NetworkInterceptor.shared.sendFeed()
         }
+    }
+
+    private func stopFeedTimer() {
+        feedTimer?.invalidate()
+        feedTimer = nil
     }
 
     // MARK: - License
@@ -157,14 +156,16 @@ class XRDOverlay: NSObject {
 
     private func showOverlayUI() {
         addToggleButton()
-        if settings.isMacroEnabled { addMacroButton() }
+        if settings.isMacroEnabled {
+            addMacroButton()
+            startFeedTimer()
+        }
     }
 
     private func addToggleButton() {
         ensureContainer()
         guard let c = container else { return }
         toggleBtn?.removeFromSuperview()
-
         let screenW = c.bounds.width
         let btn = ToggleButton(frame: CGRect(x: screenW - 52, y: 40, width: 40, height: 40))
         btn.autoresizingMask = [.flexibleLeftMargin]
@@ -173,25 +174,20 @@ class XRDOverlay: NSObject {
         toggleBtn = btn
     }
 
-    // MARK: - Macro Button
-
     private func addMacroButton() {
         ensureContainer()
         guard let c = container else { return }
         macroBtn?.removeFromSuperview()
-
         let size = CGFloat(settings.macroButtonSize)
         let btn = MacroButton(frame: CGRect(x: 50, y: c.bounds.height - size - 50, width: size, height: size))
         btn.autoresizingMask = [.flexibleTopMargin, .flexibleRightMargin]
-        btn.isDragMode = settings.macroDragMode
-        btn.onStart = { [weak self] in self?.startMacro() }
-        btn.onStop = { [weak self] in self?.stopMacro() }
+        btn.power = settings.macroPower
         c.addSubview(btn)
         macroBtn = btn
     }
 
     private func removeMacroButton() {
-        stopMacro()
+        stopFeedTimer()
         macroBtn?.removeFromSuperview()
         macroBtn = nil
     }
@@ -206,19 +202,6 @@ class XRDOverlay: NSObject {
         btn.setNeedsDisplay()
     }
 
-    // MARK: - Macro
-
-    private func startMacro() {
-        settings.isMacroActive = true
-        macroTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { _ in }
-    }
-
-    private func stopMacro() {
-        settings.isMacroActive = false
-        macroTimer?.invalidate()
-        macroTimer = nil
-    }
-
     // MARK: - Menu
 
     private func toggleMenu() {
@@ -229,29 +212,23 @@ class XRDOverlay: NSObject {
     private func showMenu() {
         ensureContainer()
         guard let c = container else { return }
-
-        let menu = ModMenuView(settings: settings, botEngine: botEngine)
+        let menu = ModMenuView(settings: settings, botEngine: botEngine, zoomEngine: zoomEngine)
         let hosting = UIHostingController(rootView: AnyView(menu))
         hosting.view.backgroundColor = .clear
-
-        let menuW: CGFloat = 210
-        let menuH: CGFloat = 300
+        let menuW: CGFloat = 220
+        let menuH: CGFloat = 310
         let x = c.bounds.width - menuW - 8
         let y: CGFloat = 85
         let finalFrame = CGRect(x: x, y: y, width: menuW, height: menuH)
         hosting.view.frame = finalFrame.offsetBy(dx: 0, dy: -12)
         hosting.view.alpha = 0
-
         c.addSubview(hosting.view)
-
         let pan = UIPanGestureRecognizer(target: self, action: #selector(dragMenu(_:)))
         hosting.view.addGestureRecognizer(pan)
-
         UIView.animate(withDuration: 0.2, delay: 0, options: .curveEaseOut) {
             hosting.view.alpha = 1
             hosting.view.frame = finalFrame
         }
-
         menuHosting = hosting
     }
 
@@ -260,9 +237,7 @@ class XRDOverlay: NSObject {
         UIView.animate(withDuration: 0.15, animations: {
             hosting.view.alpha = 0
             hosting.view.frame = hosting.view.frame.offsetBy(dx: 0, dy: -10)
-        }) { _ in
-            hosting.view.removeFromSuperview()
-        }
+        }) { _ in hosting.view.removeFromSuperview() }
         menuHosting = nil
     }
 
@@ -271,6 +246,250 @@ class XRDOverlay: NSObject {
         let t = g.translation(in: v.superview)
         v.center = CGPoint(x: v.center.x + t.x, y: v.center.y + t.y)
         g.setTranslation(.zero, in: v.superview)
+    }
+}
+
+// MARK: - Zoom Engine
+
+class ZoomEngine: ObservableObject {
+    enum Method: String {
+        case engineHook = "Engine"
+        case objcHook = "ObjC"
+        case displayZoom = "Display"
+    }
+
+    @Published var currentZoom: CGFloat = 1.0
+    @Published var activeMethod: Method = .displayZoom
+    @Published var statusText: String = "Initializing..."
+    @Published var debugInfo: String = ""
+
+    private weak var gameWindow: UIWindow?
+    private var gameView: UIView?
+    private var originalFrame: CGRect = .zero
+    private var originalScaleFactor: CGFloat = 0
+
+    private var getInstanceFn: (() -> UnsafeMutableRawPointer)?
+    private var getSceneFn: ((UnsafeMutableRawPointer) -> UnsafeMutableRawPointer?)?
+    private var setScaleFn: ((UnsafeMutableRawPointer, Float) -> Void)?
+
+    private weak var objcDirector: AnyObject?
+    private var objcSceneSel: Selector?
+    private var objcSetScaleIMP: IMP?
+
+    func setup(window: UIWindow) {
+        gameWindow = window
+        gameView = findGameView(in: window)
+        if let gv = gameView {
+            originalFrame = gv.frame
+            originalScaleFactor = gv.contentScaleFactor
+            debugInfo = String(describing: type(of: gv))
+        } else {
+            debugInfo = "no game view"
+        }
+
+        if tryCocos2dCpp() {
+            activeMethod = .engineHook
+            statusText = "Engine hook active"
+            return
+        }
+
+        if tryObjCDirector() {
+            activeMethod = .objcHook
+            statusText = "ObjC hook active"
+            return
+        }
+
+        activeMethod = .displayZoom
+        statusText = gameView != nil ? "Display zoom ready" : "Zoom on root view"
+
+        if gameView == nil {
+            gameView = window.rootViewController?.view
+            if let gv = gameView {
+                originalFrame = gv.frame
+                originalScaleFactor = gv.contentScaleFactor
+                debugInfo = "rootVC: \(String(describing: type(of: gv)))"
+            }
+        }
+    }
+
+    func setZoom(_ factor: CGFloat) {
+        currentZoom = factor
+        switch activeMethod {
+        case .engineHook:
+            applyEngineZoom(factor)
+        case .objcHook:
+            applyObjCZoom(factor)
+        case .displayZoom:
+            applyDisplayZoom(factor)
+        }
+    }
+
+    func reset() {
+        setZoom(1.0)
+    }
+
+    // MARK: - Strategy 1: C++ dlsym
+
+    private func tryCocos2dCpp() -> Bool {
+        guard let handle = dlopen(nil, RTLD_NOW) else { return false }
+
+        let namespaces = ["7cocos2d", "2ax", "2cc"]
+        for ns in namespaces {
+            let giName = "_ZN\(ns)8Director11getInstanceEv"
+            guard let giSym = dlsym(handle, giName) else { continue }
+
+            typealias GIFn = @convention(c) () -> UnsafeMutableRawPointer
+            let gi = unsafeBitCast(giSym, to: GIFn.self)
+
+            let gsNames = [
+                "_ZNK\(ns)8Director15getRunningSceneEv",
+                "_ZN\(ns)8Director15getRunningSceneEv"
+            ]
+            var gsResolved: UnsafeMutableRawPointer?
+            for n in gsNames {
+                gsResolved = dlsym(handle, n)
+                if gsResolved != nil { break }
+            }
+            guard let gsSym = gsResolved else { continue }
+
+            let ssNames = [
+                "_ZN\(ns)4Node8setScaleEf",
+                "_ZN\(ns)4Node8setScaleEff"
+            ]
+            var ssResolved: UnsafeMutableRawPointer?
+            for n in ssNames {
+                ssResolved = dlsym(handle, n)
+                if ssResolved != nil { break }
+            }
+            guard let ssSym = ssResolved else { continue }
+
+            typealias GSFn = @convention(c) (UnsafeMutableRawPointer) -> UnsafeMutableRawPointer?
+            let gs = unsafeBitCast(gsSym, to: GSFn.self)
+            typealias SSFn = @convention(c) (UnsafeMutableRawPointer, Float) -> Void
+            let ss = unsafeBitCast(ssSym, to: SSFn.self)
+
+            let director = gi()
+            guard gs(director) != nil else { continue }
+
+            getInstanceFn = { gi() }
+            getSceneFn = gs
+            setScaleFn = ss
+            debugInfo = "C++ ns=\(ns)"
+            return true
+        }
+        return false
+    }
+
+    private func applyEngineZoom(_ factor: CGFloat) {
+        guard let gi = getInstanceFn, let gs = getSceneFn, let ss = setScaleFn else { return }
+        let director = gi()
+        guard let scene = gs(director) else { return }
+        ss(scene, Float(1.0 / factor))
+    }
+
+    // MARK: - Strategy 2: ObjC runtime
+
+    private func tryObjCDirector() -> Bool {
+        let classNames = ["CCDirector", "Director", "CCEAGLView"]
+        let selectorNames = ["sharedDirector", "getInstance", "shared"]
+
+        for className in classNames {
+            guard let cls = NSClassFromString(className) else { continue }
+            for selName in selectorNames {
+                let sel = NSSelectorFromString(selName)
+                guard cls.responds(to: sel) else { continue }
+                guard let result = (cls as AnyObject).perform(sel) else { continue }
+                let director = result.takeUnretainedValue()
+
+                let sceneSel = NSSelectorFromString("runningScene")
+                guard director.responds(to: sceneSel) else { continue }
+                guard let sceneResult = director.perform(sceneSel) else { continue }
+                let scene = sceneResult.takeUnretainedValue()
+
+                let scaleSel = NSSelectorFromString("setScale:")
+                guard scene.responds(to: scaleSel) else { continue }
+
+                guard let imp = class_getMethodImplementation(type(of: scene) as? AnyClass, scaleSel) else { continue }
+
+                objcDirector = director
+                objcSceneSel = sceneSel
+                objcSetScaleIMP = imp
+                debugInfo = "ObjC \(className).\(selName)"
+                return true
+            }
+        }
+        return false
+    }
+
+    private func applyObjCZoom(_ factor: CGFloat) {
+        guard let director = objcDirector,
+              let sceneSel = objcSceneSel,
+              let imp = objcSetScaleIMP else { return }
+
+        guard let sceneResult = director.perform(sceneSel) else { return }
+        let scene = sceneResult.takeUnretainedValue()
+
+        typealias SetScaleFn = @convention(c) (AnyObject, Selector, CGFloat) -> Void
+        let fn = unsafeBitCast(imp, to: SetScaleFn.self)
+        fn(scene, NSSelectorFromString("setScale:"), 1.0 / factor)
+    }
+
+    // MARK: - Strategy 3: Display zoom
+
+    private func applyDisplayZoom(_ factor: CGFloat) {
+        guard let view = gameView else { return }
+        if abs(factor - 1.0) < 0.01 {
+            view.transform = .identity
+            return
+        }
+        let scale = 1.0 / factor
+        view.transform = CGAffineTransform(scaleX: scale, y: scale)
+    }
+
+    // MARK: - Game view detection
+
+    private func findGameView(in window: UIWindow) -> UIView? {
+        guard let root = window.rootViewController?.view else { return nil }
+        let gameClassHints = [
+            "CCEAGL", "CCMetal", "CCRender",
+            "MTKView", "GLKView",
+            "EAGLView", "MetalView", "OpenGL",
+            "Cocos", "cocos"
+        ]
+        if let found = findViewByClass(root, hints: gameClassHints) {
+            return found
+        }
+        if let biggest = findBiggestOpaqueChild(root) {
+            return biggest
+        }
+        return nil
+    }
+
+    private func findViewByClass(_ view: UIView, hints: [String]) -> UIView? {
+        let name = String(describing: type(of: view))
+        for hint in hints {
+            if name.localizedCaseInsensitiveContains(hint) { return view }
+        }
+        for sub in view.subviews {
+            if let found = findViewByClass(sub, hints: hints) { return found }
+        }
+        return nil
+    }
+
+    private func findBiggestOpaqueChild(_ root: UIView) -> UIView? {
+        let screenArea = UIScreen.main.bounds.width * UIScreen.main.bounds.height
+        var best: UIView?
+        var bestArea: CGFloat = 0
+        func scan(_ view: UIView) {
+            let area = view.bounds.width * view.bounds.height
+            if area > screenArea * 0.5 && area > bestArea && view !== root && view.isOpaque {
+                best = view
+                bestArea = area
+            }
+            for sub in view.subviews { scan(sub) }
+        }
+        scan(root)
+        return best
     }
 }
 
@@ -292,7 +511,7 @@ class XRDPassthroughView: UIView {
     }
 }
 
-// MARK: - Toggle Button (draggable + tappable)
+// MARK: - Toggle Button
 
 class ToggleButton: UIView {
     var onTap: (() -> Void)?
@@ -306,7 +525,6 @@ class ToggleButton: UIView {
         layer.borderWidth = 1.5
         layer.borderColor = UIColor(red: 0.459, green: 0.318, blue: 0.957, alpha: 1).cgColor
         clipsToBounds = true
-
         let lbl = UILabel(frame: bounds)
         lbl.text = "XRD"
         lbl.font = .systemFont(ofSize: 10, weight: .black)
@@ -319,8 +537,7 @@ class ToggleButton: UIView {
     required init?(coder: NSCoder) { fatalError() }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        startCenter = center
-        moved = false
+        startCenter = center; moved = false
         UIView.animate(withDuration: 0.1) { self.transform = CGAffineTransform(scaleX: 0.9, y: 0.9) }
     }
 
@@ -342,12 +559,10 @@ class ToggleButton: UIView {
     }
 }
 
-// MARK: - Macro Button (drag mode vs use mode)
+// MARK: - Macro Button (draggable indicator only)
 
 class MacroButton: UIView {
-    var onStart: (() -> Void)?
-    var onStop: (() -> Void)?
-    var isDragMode: Bool = false
+    var power: Double = 5 { didSet { setNeedsDisplay() } }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -361,65 +576,44 @@ class MacroButton: UIView {
 
     override func draw(_ rect: CGRect) {
         guard let ctx = UIGraphicsGetCurrentContext() else { return }
-        let c = CGPoint(x: bounds.midX, y: bounds.midY)
-        let r = min(bounds.width, bounds.height) / 2
 
         ctx.setFillColor(UIColor(white: 0.18, alpha: 0.55).cgColor)
         ctx.fillEllipse(in: bounds.insetBy(dx: 1, dy: 1))
 
-        let borderColor = isDragMode
-            ? UIColor(red: 1, green: 0.6, blue: 0, alpha: 0.7).cgColor
-            : UIColor(white: 0.55, alpha: 0.45).cgColor
-        ctx.setStrokeColor(borderColor)
+        let green = UIColor(red: 0.2, green: 0.85, blue: 0.4, alpha: 0.7)
+        ctx.setStrokeColor(green.cgColor)
         ctx.setLineWidth(1.5)
         ctx.strokeEllipse(in: bounds.insetBy(dx: 1, dy: 1))
 
-        let spokes = 8
-        ctx.setStrokeColor(UIColor(white: 1, alpha: 0.3).cgColor)
-        ctx.setLineWidth(1)
-        for i in 0..<spokes {
-            let a = CGFloat(i) * .pi * 2 / CGFloat(spokes) - .pi / 2
-            ctx.move(to: c)
-            ctx.addLine(to: CGPoint(x: c.x + cos(a) * (r - 5), y: c.y + sin(a) * (r - 5)))
-        }
-        ctx.strokePath()
+        let c = CGPoint(x: bounds.midX, y: bounds.midY)
+        let powerText = "\(Int(power))"
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: UIFont.systemFont(ofSize: 11, weight: .black),
+            .foregroundColor: UIColor.white.withAlphaComponent(0.9)
+        ]
+        let size = (powerText as NSString).size(withAttributes: attrs)
+        (powerText as NSString).draw(
+            at: CGPoint(x: c.x - size.width / 2, y: c.y - size.height / 2 - 2),
+            withAttributes: attrs
+        )
 
-        for ring in 1...3 {
-            let ringR = (r - 5) * CGFloat(ring) / 4
-            let path = UIBezierPath()
-            for i in 0..<spokes {
-                let a = CGFloat(i) * .pi * 2 / CGFloat(spokes) - .pi / 2
-                let p = CGPoint(x: c.x + cos(a) * ringR, y: c.y + sin(a) * ringR)
-                if i == 0 { path.move(to: p) } else { path.addLine(to: p) }
-            }
-            path.close()
-            path.lineWidth = 0.8
-            UIColor(white: 1, alpha: 0.2).setStroke()
-            path.stroke()
-        }
-
-        if isDragMode {
-            let icon = "DRAG"
-            let attrs: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 8, weight: .bold),
-                .foregroundColor: UIColor.orange
-            ]
-            let size = (icon as NSString).size(withAttributes: attrs)
-            (icon as NSString).draw(at: CGPoint(x: c.x - size.width / 2, y: c.y - size.height / 2), withAttributes: attrs)
-        }
+        let subAttrs: [NSAttributedString.Key: Any] = [
+            .font: UIFont.systemFont(ofSize: 6, weight: .bold),
+            .foregroundColor: green
+        ]
+        let subText = "FEED"
+        let subSize = (subText as NSString).size(withAttributes: subAttrs)
+        (subText as NSString).draw(
+            at: CGPoint(x: c.x - subSize.width / 2, y: c.y + size.height / 2 - 4),
+            withAttributes: subAttrs
+        )
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        if isDragMode { return }
-        onStart?()
-        UIView.animate(withDuration: 0.1) {
-            self.transform = CGAffineTransform(scaleX: 1.1, y: 1.1)
-            self.alpha = 0.85
-        }
+        UIView.animate(withDuration: 0.1) { self.alpha = 0.7 }
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard isDragMode else { return }
         guard let t = touches.first else { return }
         let loc = t.location(in: superview)
         let prev = t.previousLocation(in: superview)
@@ -427,20 +621,10 @@ class MacroButton: UIView {
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
-        if isDragMode { return }
-        onStop?()
-        UIView.animate(withDuration: 0.1) {
-            self.transform = .identity
-            self.alpha = 1
-        }
+        UIView.animate(withDuration: 0.1) { self.alpha = 1 }
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
-        if isDragMode { return }
-        onStop?()
-        UIView.animate(withDuration: 0.1) {
-            self.transform = .identity
-            self.alpha = 1
-        }
+        UIView.animate(withDuration: 0.1) { self.alpha = 1 }
     }
 }

@@ -4,8 +4,8 @@ struct BotConfigPanel: View {
     @ObservedObject var settings: GameSettings
     @ObservedObject var botEngine: BotEngine
     @State private var nameInput: String = "XRD Bot"
-    @State private var botCountStr: String = "10"
     @State private var groupCode: String = ""
+    @State private var manualServer: String = ""
 
     private var xrdPurple: Color { Color(red: 0.459, green: 0.318, blue: 0.957) }
     private var xrdCyan: Color { Color(red: 0.2, green: 0.8, blue: 0.9) }
@@ -15,41 +15,51 @@ struct BotConfigPanel: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            // GROUP CODE
-            VStack(alignment: .leading, spacing: 5) {
-                sectionHeader("GROUP CODE")
-                Text("Enter your agar.io party code so bots join your game")
-                    .font(.system(size: 7, design: .monospaced))
-                    .foregroundColor(.gray.opacity(0.7))
-                HStack(spacing: 4) {
-                    TextField("Party code", text: $groupCode)
-                        .textFieldStyle(XRDTextFieldStyle())
-                    Button(action: {
-                        if let s = UIPasteboard.general.string { groupCode = s }
-                    }) {
-                        Image(systemName: "doc.on.clipboard")
-                            .font(.system(size: 10))
-                            .foregroundColor(xrdCyan)
-                            .padding(5)
-                            .background(Color.white.opacity(0.1))
-                            .cornerRadius(5)
-                    }
-                }
-            }
-            .sectionStyle()
+            serverSection
+            uidSection
+            targetSection
+            botSettings
+            launchButtons
+            if botEngine.isRunning { botStats }
+            playerList
+            Spacer(minLength: 8)
+        }
+    }
 
-            // TARGET UID
-            VStack(alignment: .leading, spacing: 5) {
-                sectionHeader("TARGET UID")
-                Text("Bots will move toward this player")
+    // MARK: - Server
+
+    private var serverSection: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                sectionHeader("SERVER")
+                Spacer()
+                Circle()
+                    .fill(NetworkInterceptor.shared.hasServer ? Color.green : Color.red)
+                    .frame(width: 6, height: 6)
+                Text(NetworkInterceptor.shared.hasServer ? "OK" : "NONE")
+                    .font(.system(size: 7, weight: .bold, design: .monospaced))
+                    .foregroundColor(NetworkInterceptor.shared.hasServer ? .green : .red)
+            }
+
+            if let url = NetworkInterceptor.shared.bestServerURL {
+                Text(String(url.prefix(35)))
                     .font(.system(size: 7, design: .monospaced))
-                    .foregroundColor(.gray.opacity(0.7))
+                    .foregroundColor(.gray)
+                    .lineLimit(1)
+            }
+
+            if !NetworkInterceptor.shared.hasServer {
+                Text("Play a game first OR paste server URL below")
+                    .font(.system(size: 7, design: .monospaced))
+                    .foregroundColor(.orange.opacity(0.7))
+
                 HStack(spacing: 4) {
-                    TextField("Player UID", text: $settings.botConfig.targetUID)
+                    TextField("wss://server-url...", text: $manualServer)
                         .textFieldStyle(XRDTextFieldStyle())
                     Button(action: {
                         if let s = UIPasteboard.general.string {
-                            settings.botConfig.targetUID = s
+                            manualServer = s
+                            NetworkInterceptor.shared.setManualServer(s)
                         }
                     }) {
                         Image(systemName: "doc.on.clipboard")
@@ -59,77 +69,233 @@ struct BotConfigPanel: View {
                             .background(Color.white.opacity(0.1))
                             .cornerRadius(5)
                     }
-                }
-            }
-            .sectionStyle()
-
-            // BOT SETTINGS
-            VStack(alignment: .leading, spacing: 5) {
-                sectionHeader("BOTS")
-
-                fieldRow("Count") {
-                    HStack(spacing: 3) {
-                        ForEach([5, 10, 25, 50], id: \.self) { n in cntBtn(n) }
+                    Button(action: {
+                        guard !manualServer.isEmpty else { return }
+                        NetworkInterceptor.shared.setManualServer(manualServer)
+                    }) {
+                        Text("SET")
+                            .font(.system(size: 8, weight: .black, design: .monospaced))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 5)
+                            .background(xrdPurple)
+                            .cornerRadius(5)
                     }
                 }
-
-                fieldRow("Names") {
-                    TextField("Comma sep.", text: $nameInput)
-                        .textFieldStyle(XRDTextFieldStyle())
-                        .onChange(of: nameInput) { v in
-                            settings.botConfig.botNames = v.split(separator: ",")
-                                .map { String($0).trimmingCharacters(in: .whitespaces) }
-                            if settings.botConfig.botNames.isEmpty {
-                                settings.botConfig.botNames = ["XRD Bot"]
-                            }
-                        }
-                }
-
-                XRDDropdown(label: "Action", selection: $settings.botConfig.botAction)
             }
-            .sectionStyle()
+        }
+        .sectionStyle()
+    }
 
-            // LAUNCH / STOP
-            HStack(spacing: 8) {
-                Button(action: launchBots) {
-                    HStack(spacing: 3) {
-                        Image(systemName: "bolt.fill").font(.system(size: 10))
-                        Text("LAUNCH")
-                            .font(.system(size: 10, weight: .black, design: .monospaced))
-                    }
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(xrdGradient)
-                    .cornerRadius(8)
-                }
-                .disabled(botEngine.isRunning)
-                .opacity(botEngine.isRunning ? 0.5 : 1)
+    // MARK: - Your UID
 
-                Button(action: { botEngine.stopBots() }) {
-                    HStack(spacing: 3) {
-                        Image(systemName: "stop.fill").font(.system(size: 10))
-                        Text("STOP")
-                            .font(.system(size: 10, weight: .black, design: .monospaced))
-                    }
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(Color.red.opacity(0.8))
-                    .cornerRadius(8)
-                }
-                .disabled(!botEngine.isRunning)
-                .opacity(!botEngine.isRunning ? 0.5 : 1)
+    private var uidSection: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            sectionHeader("YOUR UID")
+            HStack(spacing: 4) {
+                Text("Name")
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .foregroundColor(.gray)
+                    .frame(width: 38, alignment: .leading)
+                TextField("Your IGN", text: $settings.playerName)
+                    .textFieldStyle(XRDTextFieldStyle())
             }
 
-            if botEngine.isRunning {
+            if !settings.detectedUID.isEmpty {
                 HStack {
-                    statPill("Spawned", "\(botEngine.totalSpawned)")
-                    statPill("Alive", "\(botEngine.totalAlive)")
+                    Text("UID:")
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .foregroundColor(.gray)
+                    Text(settings.detectedUID)
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundColor(xrdCyan)
+                    Spacer()
+                    Button(action: { UIPasteboard.general.string = settings.detectedUID }) {
+                        Image(systemName: "doc.on.doc")
+                            .font(.system(size: 10))
+                            .foregroundColor(xrdCyan)
+                            .padding(4)
+                            .background(Color.white.opacity(0.1))
+                            .cornerRadius(4)
+                    }
+                }
+            } else {
+                Text("Launch bots to detect your UID")
+                    .font(.system(size: 7, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.6))
+            }
+        }
+        .sectionStyle()
+    }
+
+    // MARK: - Target
+
+    private var targetSection: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            sectionHeader("TARGET")
+            HStack(spacing: 4) {
+                TextField("UID or name", text: $settings.botConfig.targetUID)
+                    .textFieldStyle(XRDTextFieldStyle())
+                Button(action: {
+                    if let s = UIPasteboard.general.string { settings.botConfig.targetUID = s }
+                }) {
+                    Image(systemName: "doc.on.clipboard")
+                        .font(.system(size: 10))
+                        .foregroundColor(xrdCyan)
+                        .padding(5)
+                        .background(Color.white.opacity(0.1))
+                        .cornerRadius(5)
                 }
             }
 
-            Spacer(minLength: 8)
+            HStack(spacing: 4) {
+                Text("Code")
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .foregroundColor(.gray)
+                    .frame(width: 38, alignment: .leading)
+                TextField("Party code", text: $groupCode)
+                    .textFieldStyle(XRDTextFieldStyle())
+                Button(action: {
+                    if let s = UIPasteboard.general.string { groupCode = s }
+                }) {
+                    Image(systemName: "doc.on.clipboard")
+                        .font(.system(size: 10))
+                        .foregroundColor(xrdCyan)
+                        .padding(5)
+                        .background(Color.white.opacity(0.1))
+                        .cornerRadius(5)
+                }
+            }
+        }
+        .sectionStyle()
+    }
+
+    // MARK: - Bot Settings
+
+    private var botSettings: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            sectionHeader("BOTS")
+
+            fieldRow("Count") {
+                HStack(spacing: 3) {
+                    ForEach([5, 10, 25, 50], id: \.self) { n in cntBtn(n) }
+                }
+            }
+
+            fieldRow("Names") {
+                TextField("Comma sep.", text: $nameInput)
+                    .textFieldStyle(XRDTextFieldStyle())
+                    .onChange(of: nameInput) { v in
+                        settings.botConfig.botNames = v.split(separator: ",")
+                            .map { String($0).trimmingCharacters(in: .whitespaces) }
+                        if settings.botConfig.botNames.isEmpty {
+                            settings.botConfig.botNames = ["XRD Bot"]
+                        }
+                    }
+            }
+
+            XRDDropdown(label: "Action", selection: $settings.botConfig.botAction)
+        }
+        .sectionStyle()
+    }
+
+    // MARK: - Launch / Stop
+
+    private var launchButtons: some View {
+        HStack(spacing: 8) {
+            Button(action: launchBots) {
+                HStack(spacing: 3) {
+                    Image(systemName: "bolt.fill").font(.system(size: 10))
+                    Text("LAUNCH").font(.system(size: 10, weight: .black, design: .monospaced))
+                }
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .background(xrdGradient)
+                .cornerRadius(8)
+            }
+            .disabled(botEngine.isRunning)
+            .opacity(botEngine.isRunning ? 0.5 : 1)
+
+            Button(action: { botEngine.stopBots() }) {
+                HStack(spacing: 3) {
+                    Image(systemName: "stop.fill").font(.system(size: 10))
+                    Text("STOP").font(.system(size: 10, weight: .black, design: .monospaced))
+                }
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .background(Color.red.opacity(0.8))
+                .cornerRadius(8)
+            }
+            .disabled(!botEngine.isRunning)
+            .opacity(!botEngine.isRunning ? 0.5 : 1)
+        }
+    }
+
+    private var botStats: some View {
+        HStack {
+            statPill("Spawned", "\(botEngine.totalSpawned)")
+            statPill("Alive", "\(botEngine.totalAlive)")
+            statPill("Players", "\(settings.currentPlayers.count)")
+        }
+    }
+
+    // MARK: - Player List (grab UID)
+
+    @ViewBuilder
+    private var playerList: some View {
+        let players = settings.currentPlayers
+            .filter { !settings.ownCellIDs.contains($0.id) && !$0.name.isEmpty }
+            .sorted { $0.mass > $1.mass }
+
+        if !players.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                sectionHeader("PLAYERS (\(players.count))")
+
+                ForEach(players.prefix(15)) { player in
+                    HStack(spacing: 4) {
+                        Text(player.name)
+                            .font(.system(size: 9, weight: .medium, design: .monospaced))
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        Text("\(player.displayMass)")
+                            .font(.system(size: 8, weight: .bold, design: .monospaced))
+                            .foregroundColor(.gray)
+                            .frame(width: 30, alignment: .trailing)
+
+                        Button(action: {
+                            UIPasteboard.general.string = player.uid
+                        }) {
+                            Text(String(player.uid.prefix(6)))
+                                .font(.system(size: 8, design: .monospaced))
+                                .foregroundColor(xrdCyan)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 2)
+                                .background(Color.white.opacity(0.06))
+                                .cornerRadius(3)
+                        }
+
+                        Button(action: {
+                            settings.botConfig.targetUID = player.uid
+                            settings.targetPlayer = player
+                            botEngine.updateTarget(x: player.x, y: player.y)
+                        }) {
+                            Image(systemName: settings.targetPlayer?.id == player.id ? "target" : "scope")
+                                .font(.system(size: 11))
+                                .foregroundColor(settings.targetPlayer?.id == player.id ? xrdCyan : .gray)
+                        }
+                        .frame(width: 20)
+                    }
+                    .padding(.vertical, 2)
+                    .padding(.horizontal, 4)
+                    .background(settings.targetPlayer?.id == player.id ? xrdPurple.opacity(0.15) : Color.clear)
+                    .cornerRadius(4)
+                }
+            }
+            .sectionStyle()
         }
     }
 
@@ -137,10 +303,6 @@ struct BotConfigPanel: View {
 
     private func launchBots() {
         settings.botConfig.partyCode = groupCode
-        settings.botConfig.gameMode = groupCode.isEmpty ? .classic : .party
-        if let t = settings.targetPlayer {
-            botEngine.updateTargetFromPlayer(t)
-        }
         botEngine.startBots(config: settings.botConfig)
     }
 
@@ -166,7 +328,6 @@ struct BotConfigPanel: View {
     private func cntBtn(_ count: Int) -> some View {
         let isActive = settings.botConfig.botCount == count
         return Button("\(count)") {
-            botCountStr = "\(count)"
             settings.botConfig.botCount = count
         }
         .font(.system(size: 9, weight: .bold, design: .monospaced))

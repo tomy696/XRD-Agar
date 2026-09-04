@@ -12,22 +12,13 @@ class AgarBot: NSObject, Identifiable {
     let name: String
     let serverURL: String
     let serverToken: String
-    let massBoost: MassBoost
     let action: BotAction
-    let shouldSplit: Bool
     var targetUID: String = ""
 
     weak var delegate: AgarBotDelegate?
 
     enum State {
-        case idle
-        case connecting
-        case connected
-        case spawning
-        case alive
-        case feeding
-        case dead
-        case disconnected
+        case idle, connecting, connected, spawning, alive, dead, disconnected
     }
 
     private(set) var state: State = .idle {
@@ -41,19 +32,15 @@ class AgarBot: NSObject, Identifiable {
     private var cells: [UInt32: CellUpdate] = [:]
     private var worldBorder: WorldBorder = .default
     private var moveTimer: Timer?
-    private var feedCyclesRemaining: Int = 0
     private var isAlive: Bool = false
     private var respawnCount: Int = 0
     private let maxRespawns: Int = 50
 
-    init(name: String, serverURL: String, serverToken: String,
-         massBoost: MassBoost, action: BotAction, shouldSplit: Bool) {
+    init(name: String, serverURL: String, serverToken: String, action: BotAction) {
         self.name = name
         self.serverURL = serverURL
         self.serverToken = serverToken
-        self.massBoost = massBoost
         self.action = action
-        self.shouldSplit = shouldSplit
         super.init()
     }
 
@@ -74,7 +61,6 @@ class AgarBot: NSObject, Identifiable {
 
         webSocket = session?.webSocketTask(with: url)
         webSocket?.resume()
-
         sendHandshake()
         receiveLoop()
     }
@@ -94,12 +80,9 @@ class AgarBot: NSObject, Identifiable {
         targetPosition = (x, y)
     }
 
-    // MARK: - Packet Sending
-
     private func sendHandshake() {
         sendBinary(AgarProtocol.handshakePacket())
         sendBinary(AgarProtocol.connectionKeyPacket())
-
         if !serverToken.isEmpty {
             sendBinary(AgarProtocol.facebookTokenPacket(token: serverToken))
         }
@@ -107,7 +90,6 @@ class AgarBot: NSObject, Identifiable {
 
     func spawn() {
         state = .spawning
-        feedCyclesRemaining = massBoost.feedCycles
         sendBinary(AgarProtocol.spawnPacket(name: name))
     }
 
@@ -115,33 +97,17 @@ class AgarBot: NSObject, Identifiable {
         sendBinary(AgarProtocol.movePacket(x: x, y: y))
     }
 
-    private func sendSplit() {
-        sendBinary(AgarProtocol.splitPacket())
-    }
-
-    private func sendEjectMass() {
-        sendBinary(AgarProtocol.ejectMassPacket())
-    }
-
     private func sendBinary(_ data: Data) {
-        let message = URLSessionWebSocketTask.Message.data(data)
-        webSocket?.send(message) { _ in }
+        webSocket?.send(.data(data)) { _ in }
     }
-
-    // MARK: - Receive Loop
 
     private func receiveLoop() {
         webSocket?.receive { [weak self] result in
             guard let self = self else { return }
             switch result {
             case .success(let message):
-                switch message {
-                case .data(let data):
+                if case .data(let data) = message {
                     self.handlePacket(data)
-                case .string:
-                    break
-                @unknown default:
-                    break
                 }
                 self.receiveLoop()
             case .failure:
@@ -150,37 +116,26 @@ class AgarBot: NSObject, Identifiable {
         }
     }
 
-    // MARK: - Packet Handling
-
     private func handlePacket(_ data: Data) {
         guard let packet = AgarProtocol.parsePacket(data) else { return }
 
         switch packet {
         case .worldUpdate(let eatRecords, let updates, let removals):
-            for update in updates {
-                cells[update.id] = update
-            }
-            for removal in removals {
-                cells.removeValue(forKey: removal)
-            }
+            for update in updates { cells[update.id] = update }
+            for removal in removals { cells.removeValue(forKey: removal) }
             for record in eatRecords {
                 cells.removeValue(forKey: record.eaten)
-                if ownIDs.contains(record.eaten) {
-                    ownIDs.removeAll { $0 == record.eaten }
-                }
+                ownIDs.removeAll { $0 == record.eaten }
             }
-
             if isAlive && ownIDs.isEmpty {
                 isAlive = false
                 state = .dead
                 handleDeath()
             }
-
             if isAlive {
                 updateUIDTarget()
                 performAction()
             }
-
             delegate?.bot(self, didReceiveWorldUpdate: updates)
 
         case .ownIDs(let ids):
@@ -194,7 +149,7 @@ class AgarBot: NSObject, Identifiable {
 
         case .worldBorder(let border):
             worldBorder = border
-            if state == .connecting {
+            if state == .connecting || state == .connected {
                 state = .connected
                 spawn()
             }
@@ -204,13 +159,11 @@ class AgarBot: NSObject, Identifiable {
 
         case .clearCell(let id):
             cells.removeValue(forKey: id)
-            if ownIDs.contains(id) {
-                ownIDs.removeAll { $0 == id }
-                if ownIDs.isEmpty {
-                    isAlive = false
-                    state = .dead
-                    handleDeath()
-                }
+            ownIDs.removeAll { $0 == id }
+            if isAlive && ownIDs.isEmpty {
+                isAlive = false
+                state = .dead
+                handleDeath()
             }
 
         default:
@@ -218,16 +171,12 @@ class AgarBot: NSObject, Identifiable {
         }
     }
 
-    // MARK: - UID Target
-
     private func updateUIDTarget() {
         guard !targetUID.isEmpty else { return }
-
         if let uid = UInt32(targetUID, radix: 16), let cell = cells[uid] {
             targetPosition = (Double(cell.x), Double(cell.y))
             return
         }
-
         if let cell = cells.values.first(where: {
             !ownIDs.contains($0.id) && !$0.isVirus && $0.name == targetUID
         }) {
@@ -239,8 +188,6 @@ class AgarBot: NSObject, Identifiable {
         cells.values.first { !ownIDs.contains($0.id) && !$0.isVirus && $0.name == name }
     }
 
-    // MARK: - AI / Actions
-
     private func startMovementLoop() {
         moveTimer?.invalidate()
         moveTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
@@ -251,66 +198,34 @@ class AgarBot: NSObject, Identifiable {
 
     private func performAction() {
         guard isAlive else { return }
-
         switch action {
-        case .suicide:
-            moveToTarget()
-            if shouldSplit {
-                sendSplit()
-            }
-
         case .feedTarget:
             moveToTarget()
-            sendEjectMass()
-
-        case .destroyViruses:
-            if let virus = findNearestVirus() {
-                sendMove(x: Double(virus.x), y: Double(virus.y))
-                sendSplit()
-            } else {
-                moveToTarget()
-            }
-
-        case .createCorpses:
-            let rx = Double.random(in: worldBorder.minX...worldBorder.maxX)
-            let ry = Double.random(in: worldBorder.minY...worldBorder.maxY)
-            sendMove(x: rx, y: ry)
-            for _ in 0..<5 { sendEjectMass() }
-
+            sendBinary(AgarProtocol.ejectMassPacket())
+        case .suicide:
+            moveToTarget()
+            sendBinary(AgarProtocol.splitPacket())
         case .feedEverywhere:
             let rx = Double.random(in: worldBorder.minX...worldBorder.maxX)
             let ry = Double.random(in: worldBorder.minY...worldBorder.maxY)
             sendMove(x: rx, y: ry)
-            sendEjectMass()
+            sendBinary(AgarProtocol.ejectMassPacket())
         }
     }
 
     private func moveToTarget() {
-        guard let target = targetPosition else {
-            let cx = worldBorder.centerX
-            let cy = worldBorder.centerY
-            sendMove(x: cx, y: cy)
+        guard let t = targetPosition else {
+            sendMove(x: worldBorder.centerX, y: worldBorder.centerY)
             return
         }
-        sendMove(x: target.x, y: target.y)
-    }
-
-    private func findNearestVirus() -> CellUpdate? {
-        guard let ownPos = ownPosition else { return nil }
-        return cells.values
-            .filter { $0.isVirus }
-            .min { a, b in
-                let distA = pow(Double(a.x) - ownPos.x, 2) + pow(Double(a.y) - ownPos.y, 2)
-                let distB = pow(Double(b.x) - ownPos.x, 2) + pow(Double(b.y) - ownPos.y, 2)
-                return distA < distB
-            }
+        sendMove(x: t.x, y: t.y)
     }
 
     private var ownPosition: (x: Double, y: Double)? {
-        let ownCells = ownIDs.compactMap { cells[$0] }
-        guard !ownCells.isEmpty else { return nil }
-        let x = ownCells.map { Double($0.x) }.reduce(0, +) / Double(ownCells.count)
-        let y = ownCells.map { Double($0.y) }.reduce(0, +) / Double(ownCells.count)
+        let own = ownIDs.compactMap { cells[$0] }
+        guard !own.isEmpty else { return nil }
+        let x = own.map { Double($0.x) }.reduce(0, +) / Double(own.count)
+        let y = own.map { Double($0.y) }.reduce(0, +) / Double(own.count)
         return (x, y)
     }
 
@@ -318,17 +233,12 @@ class AgarBot: NSObject, Identifiable {
         moveTimer?.invalidate()
         moveTimer = nil
         respawnCount += 1
-        guard respawnCount < maxRespawns else {
-            disconnect()
-            return
-        }
+        guard respawnCount < maxRespawns else { disconnect(); return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             self?.spawn()
         }
     }
 }
-
-// MARK: - URLSessionWebSocketDelegate
 
 extension AgarBot: URLSessionWebSocketDelegate {
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,

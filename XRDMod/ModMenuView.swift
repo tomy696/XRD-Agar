@@ -3,14 +3,21 @@ import SwiftUI
 struct ModMenuView: View {
     @ObservedObject var settings: GameSettings
     @ObservedObject var botEngine: BotEngine
-    @State private var activeTab: MenuTab = .macros
+    @ObservedObject var zoomEngine: ZoomEngine
+    @State private var activeTab: MenuTab = .macro
     @State private var showSaved = false
 
     enum MenuTab: String, CaseIterable {
-        case macros = "Macros"
+        case macro = "Macro"
         case bots = "Bots"
         case zoom = "Zoom"
         case config = "Config"
+    }
+
+    private var xrdPurple: Color { Color(red: 0.459, green: 0.318, blue: 0.957) }
+    private var xrdCyan: Color { Color(red: 0.2, green: 0.8, blue: 0.9) }
+    private var xrdGradient: LinearGradient {
+        LinearGradient(colors: [xrdPurple, xrdCyan], startPoint: .topLeading, endPoint: .bottomTrailing)
     }
 
     var body: some View {
@@ -39,12 +46,10 @@ struct ModMenuView: View {
             Text("XRD")
                 .font(.system(size: 18, weight: .black, design: .rounded))
                 .foregroundStyle(xrdGradient)
-                .shadow(color: xrdPurple.opacity(0.6), radius: 6)
             Spacer()
-            Text("MOD MENU")
-                .font(.system(size: 7, weight: .bold, design: .monospaced))
-                .foregroundColor(.gray)
-                .tracking(2)
+            Circle()
+                .fill(NetworkInterceptor.shared.hasServer ? Color.green : Color.red)
+                .frame(width: 6, height: 6)
         }
         .padding(.horizontal, 10)
         .padding(.top, 8)
@@ -83,43 +88,23 @@ struct ModMenuView: View {
     private var tabContent: some View {
         ScrollView(.vertical, showsIndicators: false) {
             switch activeTab {
-            case .macros:
-                macrosTab
-            case .bots:
-                BotConfigPanel(settings: settings, botEngine: botEngine)
-            case .zoom:
-                zoomTab
-            case .config:
-                configTab
+            case .macro: macroTab
+            case .bots: BotConfigPanel(settings: settings, botEngine: botEngine)
+            case .zoom: zoomTab
+            case .config: configTab
             }
         }
         .padding(.horizontal, 8)
         .padding(.top, 4)
     }
 
-    // MARK: - Macros Tab
+    // MARK: - Macro Tab
 
-    private var macrosTab: some View {
+    private var macroTab: some View {
         VStack(spacing: 8) {
-            Button(action: { settings.isAutoFeeding.toggle() }) {
-                HStack(spacing: 4) {
-                    Image(systemName: settings.isAutoFeeding ? "pause.circle.fill" : "play.circle.fill")
-                        .font(.system(size: 14))
-                    Text(settings.isAutoFeeding ? "STOP FEED" : "AUTO FEED")
-                        .font(.system(size: 10, weight: .bold, design: .monospaced))
-                }
-                .foregroundColor(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-                .background(settings.isAutoFeeding ? Color.red.opacity(0.8) : xrdPurple)
-                .cornerRadius(8)
-            }
-
             VStack(alignment: .leading, spacing: 5) {
                 HStack {
-                    Text("MACRO BUTTON")
-                        .font(.system(size: 8, weight: .bold, design: .monospaced))
-                        .foregroundColor(xrdCyan)
+                    sectionHeader("MACRO")
                     Spacer()
                     Toggle("", isOn: $settings.isMacroEnabled)
                         .tint(xrdPurple)
@@ -128,6 +113,40 @@ struct ModMenuView: View {
                 }
 
                 if settings.isMacroEnabled {
+                    HStack(spacing: 4) {
+                        Circle().fill(Color.green).frame(width: 6, height: 6)
+                        Text("AUTO FEED ON")
+                            .font(.system(size: 7, weight: .black, design: .monospaced))
+                            .foregroundColor(.green)
+                    }
+
+                    VStack(spacing: 3) {
+                        HStack {
+                            Text("Power")
+                                .font(.system(size: 8, weight: .bold, design: .monospaced))
+                                .foregroundColor(.gray)
+                            Spacer()
+                            Text("\(Int(settings.macroPower))")
+                                .font(.system(size: 11, weight: .black, design: .monospaced))
+                                .foregroundColor(xrdCyan)
+                        }
+                        Slider(value: $settings.macroPower, in: 1...10, step: 1)
+                            .accentColor(xrdPurple)
+                        HStack {
+                            Text("Slow")
+                                .font(.system(size: 7, design: .monospaced))
+                                .foregroundColor(.gray.opacity(0.5))
+                            Spacer()
+                            Text("\(Int(settings.feedInterval * 1000))ms")
+                                .font(.system(size: 7, weight: .bold, design: .monospaced))
+                                .foregroundColor(.gray)
+                            Spacer()
+                            Text("Fast")
+                                .font(.system(size: 7, design: .monospaced))
+                                .foregroundColor(.gray.opacity(0.5))
+                        }
+                    }
+
                     HStack(spacing: 6) {
                         Text("SIZE")
                             .font(.system(size: 7, weight: .bold, design: .monospaced))
@@ -150,72 +169,16 @@ struct ModMenuView: View {
                                 .background(Color.white.opacity(0.1))
                                 .cornerRadius(4)
                         }
-                        Spacer()
-                        if settings.isMacroActive {
-                            Circle().fill(Color.red).frame(width: 6, height: 6)
-                            Text("ON")
-                                .font(.system(size: 7, weight: .black, design: .monospaced))
-                                .foregroundColor(.red)
-                        }
                     }
-
-                    Toggle(isOn: $settings.macroDragMode) {
-                        Text("Drag to move")
-                            .font(.system(size: 8, weight: .medium, design: .monospaced))
-                            .foregroundColor(.white)
-                    }
-                    .tint(xrdPurple)
                 }
             }
             .sectionStyle()
 
-            VStack(alignment: .leading, spacing: 5) {
-                HStack {
-                    Text("MY UID")
-                        .font(.system(size: 8, weight: .bold, design: .monospaced))
-                        .foregroundColor(xrdCyan)
-                    Spacer()
-                    if !settings.detectedUID.isEmpty {
-                        Text(settings.detectedUID)
-                            .font(.system(size: 9, weight: .bold, design: .monospaced))
-                            .foregroundColor(.white)
-                    }
-                }
-
-                HStack(spacing: 4) {
-                    Text("Name")
-                        .font(.system(size: 8, weight: .bold, design: .monospaced))
-                        .foregroundColor(.gray)
-                        .frame(width: 38, alignment: .leading)
-                    TextField("Your IGN", text: $settings.playerName)
-                        .textFieldStyle(XRDTextFieldStyle())
-                }
-
-                Button(action: {
-                    if !settings.detectedUID.isEmpty {
-                        UIPasteboard.general.string = settings.detectedUID
-                    }
-                }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "doc.on.doc")
-                            .font(.system(size: 10))
-                        Text(settings.detectedUID.isEmpty ? "ENTER NAME TO DETECT" : "COPY UID")
-                            .font(.system(size: 9, weight: .bold, design: .monospaced))
-                    }
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 7)
-                    .background(settings.detectedUID.isEmpty ? Color.gray.opacity(0.3) : xrdPurple)
-                    .cornerRadius(6)
-                }
-                .disabled(settings.detectedUID.isEmpty)
-            }
-            .sectionStyle()
-
-            VStack(alignment: .leading, spacing: 3) {
-                infoRow("MASS", "\(settings.ownMass)")
-                infoRow("API", NetworkInterceptor.shared.hasDiscoveredAPI ? "Ready" : "Play 1 game")
-                infoRow("PLAYERS", "\(settings.currentPlayers.count)")
+            VStack(alignment: .leading, spacing: 4) {
+                sectionHeader("STATUS")
+                infoRow("WS Captured", NetworkInterceptor.shared.gameWebSocket != nil ? "Yes" : "No")
+                infoRow("Intercepted", "\(NetworkInterceptor.shared.interceptedCount)")
+                infoRow("Mass", "\(settings.ownMass)")
             }
             .sectionStyle()
 
@@ -229,56 +192,93 @@ struct ModMenuView: View {
         VStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Text("DISPLAY ZOOM")
-                        .font(.system(size: 8, weight: .bold, design: .monospaced))
-                        .foregroundColor(xrdCyan)
+                    sectionHeader("ZOOM")
                     Spacer()
-                    Text(String(format: "%.1fx", settings.zoomLevel))
-                        .font(.system(size: 10, weight: .black, design: .monospaced))
-                        .foregroundColor(.white)
+                    Text(zoomEngine.activeMethod.rawValue)
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundColor(.green)
                 }
 
-                Slider(value: $settings.zoomLevel, in: 0.3...3.0, step: 0.1)
+                infoRow("Status", zoomEngine.statusText)
+                if !zoomEngine.debugInfo.isEmpty {
+                    infoRow("View", zoomEngine.debugInfo)
+                }
+
+                VStack(spacing: 4) {
+                    HStack {
+                        Text("Level")
+                            .font(.system(size: 8, weight: .bold, design: .monospaced))
+                            .foregroundColor(.gray)
+                        Spacer()
+                        Text(String(format: "%.1fx", zoomEngine.currentZoom))
+                            .font(.system(size: 10, weight: .black, design: .monospaced))
+                            .foregroundColor(.white)
+                    }
+
+                    Slider(
+                        value: Binding(
+                            get: { zoomEngine.currentZoom },
+                            set: { zoomEngine.setZoom($0) }
+                        ),
+                        in: 0.3...3.0, step: 0.1
+                    )
                     .accentColor(xrdPurple)
 
-                HStack(spacing: 6) {
-                    ForEach([0.5, 1.0, 1.5, 2.0], id: \.self) { val in
-                        Button(action: { settings.zoomLevel = val }) {
-                            Text(String(format: "%.1fx", val))
-                                .font(.system(size: 8, weight: .bold, design: .monospaced))
-                                .foregroundColor(abs(settings.zoomLevel - val) < 0.05 ? .white : .gray)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 5)
-                                .background(abs(settings.zoomLevel - val) < 0.05 ? xrdPurple : Color.white.opacity(0.08))
-                                .cornerRadius(5)
+                    HStack(spacing: 6) {
+                        ForEach([0.5, 1.0, 1.5, 2.0], id: \.self) { val in
+                            Button(action: { zoomEngine.setZoom(val) }) {
+                                Text(String(format: "%.1fx", val))
+                                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                                    .foregroundColor(abs(zoomEngine.currentZoom - val) < 0.05 ? .white : .gray)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 5)
+                                    .background(abs(zoomEngine.currentZoom - val) < 0.05 ? xrdPurple : Color.white.opacity(0.08))
+                                    .cornerRadius(5)
+                            }
                         }
                     }
-                }
 
-                Button(action: { settings.zoomLevel = 1.0 }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.counterclockwise")
-                            .font(.system(size: 10))
-                        Text("RESET")
-                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    Button(action: { zoomEngine.reset() }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.counterclockwise").font(.system(size: 10))
+                            Text("RESET").font(.system(size: 9, weight: .bold, design: .monospaced))
+                        }
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(Color.white.opacity(0.1))
+                        .cornerRadius(8)
                     }
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .background(Color.white.opacity(0.1))
-                    .cornerRadius(8)
                 }
             }
             .sectionStyle()
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("INFO")
-                    .font(.system(size: 8, weight: .bold, design: .monospaced))
-                    .foregroundColor(.gray)
-                Text("Display zoom scales the game view. Values below 1.0x zoom out, above 1.0x zoom in.")
-                    .font(.system(size: 8, design: .monospaced))
-                    .foregroundColor(.gray.opacity(0.7))
-                    .fixedSize(horizontal: false, vertical: true)
+                if zoomEngine.activeMethod == .engineHook {
+                    HStack(spacing: 4) {
+                        Circle().fill(Color.green).frame(width: 5, height: 5)
+                        Text("Engine hook - real zoom")
+                            .font(.system(size: 8, design: .monospaced))
+                            .foregroundColor(.green.opacity(0.8))
+                    }
+                } else if zoomEngine.activeMethod == .objcHook {
+                    HStack(spacing: 4) {
+                        Circle().fill(Color.green).frame(width: 5, height: 5)
+                        Text("ObjC hook - real zoom")
+                            .font(.system(size: 8, design: .monospaced))
+                            .foregroundColor(.green.opacity(0.8))
+                    }
+                } else {
+                    HStack(spacing: 4) {
+                        Circle().fill(Color.cyan).frame(width: 5, height: 5)
+                        Text("Display zoom")
+                            .font(.system(size: 8, design: .monospaced))
+                            .foregroundColor(.cyan.opacity(0.8))
+                    }
+                    Text("< 1x = zoom out, > 1x = zoom in")
+                        .font(.system(size: 7, design: .monospaced))
+                        .foregroundColor(.gray.opacity(0.6))
+                }
             }
             .sectionStyle()
 
@@ -289,34 +289,19 @@ struct ModMenuView: View {
     // MARK: - Config Tab
 
     private var configTab: some View {
-        VStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("SETTINGS")
-                    .font(.system(size: 8, weight: .black, design: .monospaced))
-                    .foregroundColor(xrdCyan)
-                    .tracking(1.5)
-
-                Text("Save your macro, zoom, bot config so they load automatically next time.")
-                    .font(.system(size: 8, design: .monospaced))
-                    .foregroundColor(.gray.opacity(0.7))
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .sectionStyle()
-
+        VStack(spacing: 8) {
             Button(action: {
                 settings.save()
                 showSaved = true
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { showSaved = false }
             }) {
                 HStack(spacing: 4) {
-                    Image(systemName: "square.and.arrow.down.fill")
-                        .font(.system(size: 12))
-                    Text("SAVE CHANGES")
-                        .font(.system(size: 10, weight: .black, design: .monospaced))
+                    Image(systemName: "square.and.arrow.down.fill").font(.system(size: 12))
+                    Text("SAVE").font(.system(size: 10, weight: .black, design: .monospaced))
                 }
                 .foregroundColor(.white)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
+                .padding(.vertical, 10)
                 .background(xrdGradient)
                 .cornerRadius(8)
             }
@@ -330,22 +315,31 @@ struct ModMenuView: View {
 
             Button(action: { settings.resetAll() }) {
                 HStack(spacing: 4) {
-                    Image(systemName: "arrow.counterclockwise")
-                        .font(.system(size: 12))
-                    Text("RESET ALL")
-                        .font(.system(size: 10, weight: .black, design: .monospaced))
+                    Image(systemName: "arrow.counterclockwise").font(.system(size: 12))
+                    Text("RESET ALL").font(.system(size: 10, weight: .black, design: .monospaced))
                 }
                 .foregroundColor(.white)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
+                .padding(.vertical, 10)
                 .background(Color.red.opacity(0.7))
                 .cornerRadius(8)
             }
 
             VStack(alignment: .leading, spacing: 3) {
-                infoRow("LICENSE", settings.isLicenseValid ? "Active" : "Inactive")
-                infoRow("MASS", "\(settings.ownMass)")
-                infoRow("PLAYERS", "\(settings.currentPlayers.count)")
+                sectionHeader("DEBUG")
+                infoRow("License", settings.isLicenseValid ? "Active" : "Inactive")
+                infoRow("Server", NetworkInterceptor.shared.hasServer ? "Yes" : "No")
+                infoRow("WS", NetworkInterceptor.shared.gameWebSocket != nil ? "Captured" : "None")
+                infoRow("Intercepted", "\(NetworkInterceptor.shared.interceptedCount)")
+                if let url = NetworkInterceptor.shared.capturedServerURL {
+                    infoRow("URL", String(url.prefix(25)))
+                }
+            }
+            .sectionStyle()
+
+            VStack(alignment: .leading, spacing: 3) {
+                infoRow("Version", "2.0")
+                infoRow("Mod", "XRD Agar.io")
             }
             .sectionStyle()
 
@@ -354,6 +348,13 @@ struct ModMenuView: View {
     }
 
     // MARK: - Helpers
+
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 8, weight: .black, design: .monospaced))
+            .foregroundColor(xrdCyan)
+            .tracking(1.5)
+    }
 
     private func infoRow(_ label: String, _ value: String) -> some View {
         HStack {
@@ -373,28 +374,20 @@ struct ModMenuView: View {
     private var statusBar: some View {
         HStack {
             Circle()
-                .fill(botEngine.isRunning ? Color.green : (NetworkInterceptor.shared.hasDiscoveredAPI ? Color.cyan : Color.gray.opacity(0.5)))
+                .fill(botEngine.isRunning ? Color.green : (NetworkInterceptor.shared.hasServer ? Color.cyan : Color.gray.opacity(0.5)))
                 .frame(width: 5, height: 5)
-            Text(botEngine.isRunning ? botEngine.statusMessage : (NetworkInterceptor.shared.hasDiscoveredAPI ? "API ready" : "Play 1 game to setup"))
+            Text(botEngine.isRunning ? botEngine.statusMessage : (NetworkInterceptor.shared.hasServer ? "Server ready" : "Play 1 game"))
                 .font(.system(size: 7, weight: .medium, design: .monospaced))
                 .foregroundColor(.gray)
                 .lineLimit(1)
             Spacer()
-            Text("v1.1")
+            Text("v2.0")
                 .font(.system(size: 7, design: .monospaced))
                 .foregroundColor(.gray.opacity(0.4))
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
         .background(Color.white.opacity(0.03))
-    }
-
-    // MARK: - Colors
-
-    private var xrdPurple: Color { Color(red: 0.459, green: 0.318, blue: 0.957) }
-    private var xrdCyan: Color { Color(red: 0.2, green: 0.8, blue: 0.9) }
-    private var xrdGradient: LinearGradient {
-        LinearGradient(colors: [xrdPurple, xrdCyan], startPoint: .topLeading, endPoint: .bottomTrailing)
     }
 }
 

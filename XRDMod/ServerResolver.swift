@@ -8,14 +8,20 @@ class ServerResolver {
     }
 
     static func resolveServer(
-        region: ServerRegion,
-        gameMode: GameMode,
         partyCode: String = "",
         completion: @escaping (Result<ServerInfo, Error>) -> Void
     ) {
-        guard let endpointStr = NetworkInterceptor.shared.discoveredAPIEndpoint,
+        let interceptor = NetworkInterceptor.shared
+
+        if let wsURL = interceptor.bestServerURL {
+            let token = interceptor.capturedToken ?? partyCode
+            completion(.success(ServerInfo(url: wsURL, token: token)))
+            return
+        }
+
+        guard let endpointStr = interceptor.discoveredAPIEndpoint,
               let endpoint = URL(string: endpointStr) else {
-            completion(.failure(ServerError.noAPIDiscovered))
+            completion(.failure(ServerError.noServer))
             return
         }
 
@@ -24,7 +30,7 @@ class ServerResolver {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("https://agar.io", forHTTPHeaderField: "Origin")
 
-        if let headers = NetworkInterceptor.shared.discoveredHeaders {
+        if let headers = interceptor.discoveredHeaders {
             for (key, value) in headers {
                 if key.lowercased() != "content-length" {
                     request.setValue(value, forHTTPHeaderField: key)
@@ -32,16 +38,16 @@ class ServerResolver {
             }
         }
 
-        var body: [String: Any] = [
-            "region": region.apiValue,
-            "mode": (gameMode == .party && !partyCode.isEmpty) ? ":party" : gameMode.serverMode
-        ]
-        if gameMode == .party && !partyCode.isEmpty {
+        var body: [String: Any] = ["mode": partyCode.isEmpty ? ":ffa" : ":party"]
+        if !partyCode.isEmpty {
             body["token"] = partyCode
         }
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
-        URLSession.shared.dataTask(with: request) { data, response, error in
+        let session = URLSession.shared
+        NetworkInterceptor.shared.botSessions.add(session)
+
+        session.dataTask(with: request) { data, _, error in
             if let error = error {
                 completion(.failure(error))
                 return
@@ -77,13 +83,13 @@ class ServerResolver {
     enum ServerError: LocalizedError {
         case noServerFound
         case invalidResponse
-        case noAPIDiscovered
+        case noServer
 
         var errorDescription: String? {
             switch self {
-            case .noServerFound: return "No server found"
-            case .invalidResponse: return "Invalid response"
-            case .noAPIDiscovered: return "Play one game first so XRD can discover the API"
+            case .noServerFound: return "No server in response"
+            case .invalidResponse: return "Bad response"
+            case .noServer: return "Play a game first so XRD can find your server"
             }
         }
     }
