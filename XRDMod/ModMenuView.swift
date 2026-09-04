@@ -6,6 +6,7 @@ struct ModMenuView: View {
     @ObservedObject var zoomEngine: ZoomEngine
     @State private var activeTab: MenuTab = .macro
     @State private var showSaved = false
+    @State private var manualServer: String = ""
 
     enum MenuTab: String, CaseIterable {
         case macro = "Macro"
@@ -282,52 +283,44 @@ struct ModMenuView: View {
     private var configTab: some View {
         VStack(spacing: 8) {
             uidSection
+            serverConfigSection
 
-            Button(action: {
-                settings.save()
-                showSaved = true
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { showSaved = false }
-            }) {
-                HStack(spacing: 4) {
-                    Image(systemName: "square.and.arrow.down.fill").font(.system(size: 12))
-                    Text("SAVE").font(.system(size: 10, weight: .black, design: .monospaced))
+            HStack(spacing: 6) {
+                Button(action: {
+                    settings.save()
+                    showSaved = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { showSaved = false }
+                }) {
+                    HStack(spacing: 3) {
+                        Image(systemName: "square.and.arrow.down.fill").font(.system(size: 10))
+                        Text(showSaved ? "OK!" : "SAVE").font(.system(size: 9, weight: .black, design: .monospaced))
+                    }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .background(showSaved ? Color.green.opacity(0.7) : xrdPurple)
+                    .cornerRadius(6)
                 }
-                .foregroundColor(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-                .background(xrdGradient)
-                .cornerRadius(8)
-            }
 
-            if showSaved {
-                Text("Saved!")
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .foregroundColor(.green)
-                    .transition(.opacity)
-            }
-
-            Button(action: { settings.resetAll() }) {
-                HStack(spacing: 4) {
-                    Image(systemName: "arrow.counterclockwise").font(.system(size: 12))
-                    Text("RESET ALL").font(.system(size: 10, weight: .black, design: .monospaced))
+                Button(action: { settings.resetAll() }) {
+                    HStack(spacing: 3) {
+                        Image(systemName: "arrow.counterclockwise").font(.system(size: 10))
+                        Text("RESET").font(.system(size: 9, weight: .black, design: .monospaced))
+                    }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .background(Color.red.opacity(0.6))
+                    .cornerRadius(6)
                 }
-                .foregroundColor(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-                .background(Color.red.opacity(0.7))
-                .cornerRadius(8)
             }
 
             VStack(alignment: .leading, spacing: 3) {
                 sectionHeader("DEBUG")
                 infoRow("License", settings.isLicenseValid ? "Active" : "Inactive")
-                infoRow("Server", NetworkInterceptor.shared.hasServer ? "Yes" : "No")
                 infoRow("WS", NetworkInterceptor.shared.gameWebSocket != nil ? "Captured" : "None")
                 infoRow("Intercepted", "\(NetworkInterceptor.shared.interceptedCount)")
                 infoRow("Mass", "\(settings.ownMass)")
-                if let url = NetworkInterceptor.shared.capturedServerURL {
-                    infoRow("URL", String(url.prefix(25)))
-                }
             }
             .sectionStyle()
 
@@ -359,31 +352,94 @@ struct ModMenuView: View {
 
             if !settings.detectedUID.isEmpty {
                 HStack {
-                    Text("UID:")
-                        .font(.system(size: 8, weight: .bold, design: .monospaced))
-                        .foregroundColor(.gray)
                     Text(settings.detectedUID)
-                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .font(.system(size: 10, weight: .black, design: .monospaced))
                         .foregroundColor(xrdCyan)
                     Spacer()
-                    Button(action: {
-                        UIPasteboard.general.string = settings.detectedUID
-                        configCopiedUID = true
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { configCopiedUID = false }
-                    }) {
-                        Text(configCopiedUID ? "Copied!" : "COPY")
-                            .font(.system(size: 8, weight: .bold, design: .monospaced))
-                            .foregroundColor(configCopiedUID ? .green : xrdCyan)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 4)
-                            .background(Color.white.opacity(0.1))
-                            .cornerRadius(4)
+                }
+
+                Button(action: {
+                    UIPasteboard.general.string = settings.detectedUID
+                    configCopiedUID = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { configCopiedUID = false }
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: configCopiedUID ? "checkmark.circle.fill" : "doc.on.doc.fill")
+                            .font(.system(size: 10))
+                        Text(configCopiedUID ? "COPIED!" : "COPY UID")
+                            .font(.system(size: 9, weight: .black, design: .monospaced))
                     }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .background(configCopiedUID ? Color.green.opacity(0.7) : xrdPurple)
+                    .cornerRadius(6)
                 }
             } else {
-                Text("Launch bots to detect your UID")
+                Text("Enter your name above, then launch bots")
                     .font(.system(size: 7, design: .monospaced))
-                    .foregroundColor(.gray.opacity(0.6))
+                    .foregroundColor(.orange.opacity(0.7))
+            }
+        }
+        .sectionStyle()
+    }
+
+    // MARK: - Server (in Config)
+
+    private var serverConfigSection: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                sectionHeader("SERVER")
+                Spacer()
+                Circle()
+                    .fill(NetworkInterceptor.shared.hasServer ? Color.green : Color.red)
+                    .frame(width: 6, height: 6)
+                Text(NetworkInterceptor.shared.hasServer ? "OK" : "NONE")
+                    .font(.system(size: 7, weight: .bold, design: .monospaced))
+                    .foregroundColor(NetworkInterceptor.shared.hasServer ? .green : .red)
+            }
+
+            if let url = NetworkInterceptor.shared.bestServerURL {
+                Text(String(url.prefix(35)))
+                    .font(.system(size: 7, design: .monospaced))
+                    .foregroundColor(.gray)
+                    .lineLimit(1)
+            }
+
+            if !NetworkInterceptor.shared.hasServer {
+                Text("Play a game first OR paste URL:")
+                    .font(.system(size: 7, design: .monospaced))
+                    .foregroundColor(.orange.opacity(0.7))
+
+                HStack(spacing: 4) {
+                    TextField("wss://server...", text: $manualServer)
+                        .textFieldStyle(XRDTextFieldStyle())
+                    Button(action: {
+                        if let s = UIPasteboard.general.string {
+                            manualServer = s
+                            NetworkInterceptor.shared.setManualServer(s)
+                        }
+                    }) {
+                        Image(systemName: "doc.on.clipboard")
+                            .font(.system(size: 10))
+                            .foregroundColor(xrdCyan)
+                            .padding(5)
+                            .background(Color.white.opacity(0.1))
+                            .cornerRadius(5)
+                    }
+                    Button(action: {
+                        guard !manualServer.isEmpty else { return }
+                        NetworkInterceptor.shared.setManualServer(manualServer)
+                    }) {
+                        Text("SET")
+                            .font(.system(size: 8, weight: .black, design: .monospaced))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 5)
+                            .background(xrdPurple)
+                            .cornerRadius(5)
+                    }
+                }
             }
         }
         .sectionStyle()

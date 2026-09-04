@@ -5,7 +5,6 @@ struct BotConfigPanel: View {
     @ObservedObject var botEngine: BotEngine
     @State private var nameInput: String = "XRD Bot"
     @State private var groupCode: String = ""
-    @State private var manualServer: String = ""
     @State private var copiedUID: String = ""
 
     private var xrdPurple: Color { Color(red: 0.459, green: 0.318, blue: 0.957) }
@@ -19,7 +18,6 @@ struct BotConfigPanel: View {
             launchButtons
             if botEngine.isRunning { botStats }
             playerList
-            serverSection
             targetSection
             botSettings
             Spacer(minLength: 8)
@@ -134,67 +132,6 @@ struct BotConfigPanel: View {
             }
             .sectionStyle()
         }
-    }
-
-    // MARK: - Server
-
-    private var serverSection: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack {
-                sectionHeader("SERVER")
-                Spacer()
-                Circle()
-                    .fill(NetworkInterceptor.shared.hasServer ? Color.green : Color.red)
-                    .frame(width: 6, height: 6)
-                Text(NetworkInterceptor.shared.hasServer ? "OK" : "NONE")
-                    .font(.system(size: 7, weight: .bold, design: .monospaced))
-                    .foregroundColor(NetworkInterceptor.shared.hasServer ? .green : .red)
-            }
-
-            if let url = NetworkInterceptor.shared.bestServerURL {
-                Text(String(url.prefix(35)))
-                    .font(.system(size: 7, design: .monospaced))
-                    .foregroundColor(.gray)
-                    .lineLimit(1)
-            }
-
-            if !NetworkInterceptor.shared.hasServer {
-                Text("Play a game first OR paste URL below")
-                    .font(.system(size: 7, design: .monospaced))
-                    .foregroundColor(.orange.opacity(0.7))
-
-                HStack(spacing: 4) {
-                    TextField("wss://server-url...", text: $manualServer)
-                        .textFieldStyle(XRDTextFieldStyle())
-                    Button(action: {
-                        if let s = UIPasteboard.general.string {
-                            manualServer = s
-                            NetworkInterceptor.shared.setManualServer(s)
-                        }
-                    }) {
-                        Image(systemName: "doc.on.clipboard")
-                            .font(.system(size: 10))
-                            .foregroundColor(xrdCyan)
-                            .padding(5)
-                            .background(Color.white.opacity(0.1))
-                            .cornerRadius(5)
-                    }
-                    Button(action: {
-                        guard !manualServer.isEmpty else { return }
-                        NetworkInterceptor.shared.setManualServer(manualServer)
-                    }) {
-                        Text("SET")
-                            .font(.system(size: 8, weight: .black, design: .monospaced))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 5)
-                            .background(xrdPurple)
-                            .cornerRadius(5)
-                    }
-                }
-            }
-        }
-        .sectionStyle()
     }
 
     // MARK: - Target

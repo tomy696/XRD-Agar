@@ -90,8 +90,6 @@ class XRDOverlay: NSObject {
             .sink { [weak self] _ in
                 guard let self = self, self.settings.isMacroEnabled else { return }
                 self.startFeedTimer()
-                self.macroBtn?.power = self.settings.macroPower
-                self.macroBtn?.setNeedsDisplay()
             }
             .store(in: &cancellables)
 
@@ -181,7 +179,6 @@ class XRDOverlay: NSObject {
         let size = CGFloat(settings.macroButtonSize)
         let btn = MacroButton(frame: CGRect(x: 50, y: c.bounds.height - size - 50, width: size, height: size))
         btn.autoresizingMask = [.flexibleTopMargin, .flexibleRightMargin]
-        btn.power = settings.macroPower
         c.addSubview(btn)
         macroBtn = btn
     }
@@ -440,21 +437,9 @@ class ZoomEngine: ObservableObject {
         guard let view = gameView else { return }
         if abs(factor - 1.0) < 0.01 {
             view.transform = .identity
-            view.bounds = CGRect(x: 0, y: 0, width: originalFrame.width, height: originalFrame.height)
-            view.center = CGPoint(x: originalFrame.midX, y: originalFrame.midY)
             return
         }
-        let scale = 1.0 / factor
-        view.transform = .identity
-        view.bounds = CGRect(
-            x: 0, y: 0,
-            width: originalFrame.width * factor,
-            height: originalFrame.height * factor
-        )
-        view.center = CGPoint(x: originalFrame.midX, y: originalFrame.midY)
-        view.transform = CGAffineTransform(scaleX: scale, y: scale)
-        view.setNeedsLayout()
-        view.layoutIfNeeded()
+        view.transform = CGAffineTransform(scaleX: factor, y: factor)
     }
 
     // MARK: - Game view detection
@@ -570,11 +555,9 @@ class ToggleButton: UIView {
     }
 }
 
-// MARK: - Macro Button (draggable indicator only)
+// MARK: - Macro Button (draggable indicator)
 
 class MacroButton: UIView {
-    var power: Double = 5 { didSet { setNeedsDisplay() } }
-
     override init(frame: CGRect) {
         super.init(frame: frame)
         isOpaque = false
@@ -597,26 +580,15 @@ class MacroButton: UIView {
         ctx.strokeEllipse(in: bounds.insetBy(dx: 1, dy: 1))
 
         let c = CGPoint(x: bounds.midX, y: bounds.midY)
-        let powerText = "\(Int(power))"
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: UIFont.systemFont(ofSize: 11, weight: .black),
+            .font: UIFont.systemFont(ofSize: 14, weight: .black),
             .foregroundColor: UIColor.white.withAlphaComponent(0.9)
         ]
-        let size = (powerText as NSString).size(withAttributes: attrs)
-        (powerText as NSString).draw(
-            at: CGPoint(x: c.x - size.width / 2, y: c.y - size.height / 2 - 2),
+        let text = "M"
+        let size = (text as NSString).size(withAttributes: attrs)
+        (text as NSString).draw(
+            at: CGPoint(x: c.x - size.width / 2, y: c.y - size.height / 2),
             withAttributes: attrs
-        )
-
-        let subAttrs: [NSAttributedString.Key: Any] = [
-            .font: UIFont.systemFont(ofSize: 6, weight: .bold),
-            .foregroundColor: green
-        ]
-        let subText = "FEED"
-        let subSize = (subText as NSString).size(withAttributes: subAttrs)
-        (subText as NSString).draw(
-            at: CGPoint(x: c.x - subSize.width / 2, y: c.y + size.height / 2 - 4),
-            withAttributes: subAttrs
         )
     }
 
