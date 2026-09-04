@@ -294,7 +294,7 @@ class XRDOverlay: NSObject {
 
     func debugDump() -> String {
         var L: [String] = []
-        L.append("=== XRD DUMP v5 ===")
+        L.append("=== XRD DUMP v6 ===")
 
         L.append("")
         L.append("-- APP --")
@@ -305,8 +305,7 @@ class XRDOverlay: NSObject {
 
         L.append("")
         L.append("-- DEVICE --")
-        let screen = UIScreen.main
-        L.append("Screen: \(Int(screen.bounds.width))x\(Int(screen.bounds.height)) scale=\(screen.scale)")
+        L.append("Screen: \(Int(UIScreen.main.bounds.width))x\(Int(UIScreen.main.bounds.height)) scale=\(UIScreen.main.scale)")
         L.append("iOS: \(UIDevice.current.systemVersion)")
 
         L.append("")
@@ -322,10 +321,8 @@ class XRDOverlay: NSObject {
         L.append("Net.saved: \(ni.savedServerURL ?? "none")")
         L.append("Net.hasServer: \(ni.hasServer)")
         L.append("Net.intercepted: \(ni.interceptedCount)")
-        L.append("Net.apiEndpoint: \(ni.discoveredAPIEndpoint ?? "none")")
         L.append("Bots: running=\(botEngine.isRunning) alive=\(botEngine.totalAlive)")
         L.append("Macro: on=\(settings.isMacroEnabled) power=\(settings.macroPower)")
-        L.append("Players: \(settings.currentPlayers.count) OwnCells: \(settings.ownCellIDs.count)")
 
         L.append("")
         L.append("-- WINDOWS --")
@@ -334,7 +331,6 @@ class XRDOverlay: NSObject {
             for (wi, window) in ws.windows.enumerated() {
                 let rc = window.rootViewController.map { String(describing: type(of: $0)) } ?? "nil"
                 L.append("W[\(wi)]: \(type(of: window)) \(Int(window.frame.width))x\(Int(window.frame.height)) root=\(rc)")
-                dumpViewTree(window, indent: 1, lines: &L, depth: 0, maxDepth: 6)
             }
         }
 
@@ -342,8 +338,7 @@ class XRDOverlay: NSObject {
         L.append("-- GAME VIEW --")
         if let gv = zoomEngine.gameViewForDump {
             L.append("Class: \(type(of: gv))")
-            L.append("Frame: \(gv.frame) Scale: \(gv.contentScaleFactor)")
-            L.append("Layer: \(type(of: gv.layer))")
+            L.append("Frame: \(gv.frame)")
         } else {
             L.append("Not found")
         }
@@ -356,50 +351,10 @@ class XRDOverlay: NSObject {
                           "RootViewController", "MTKView", "GLKView",
                           "CCScheduler", "CCActionManager", "CCTextureCache",
                           "CCApplication", "CCScene", "CCLayer", "CCNode",
-                          "CCSprite", "CCLabelTTF", "CCMenu", "CCParticleSystem"]
+                          "CCSprite", "CCLabelTTF", "CCMenu", "CCParticleSystem",
+                          "CCCamera", "CCRenderer"]
         let found = candidates.filter { NSClassFromString($0) != nil }
         L.append("Found: \(found.joined(separator: ", "))")
-
-        L.append("")
-        L.append("-- GAME CLASSES --")
-        var allClassCount: UInt32 = 0
-        var gameClasses: [String] = []
-        if let classList = objc_copyClassList(&allClassCount) {
-            let sysPfx = ["UI", "NS", "CA", "CG", "CF", "CK", "WK", "MK", "AV",
-                          "SK", "SC", "CL", "CT", "CM", "CN", "CS", "AB", "AL",
-                          "AU", "AS", "AT", "BA", "BS", "CB", "CI", "CR", "DC",
-                          "EA", "EK", "GC", "GK", "GL", "HK", "HM", "IN", "IO",
-                          "LA", "MC", "MD", "MF", "ML", "MP", "MT", "NC", "NE",
-                          "NW", "OS", "PH", "PK", "QL", "RM", "SA", "SF", "SL",
-                          "SR", "SS", "ST", "TN", "TT", "UM", "UN", "VS", "VN",
-                          "WC", "XC", "_", "Web", "DOM", "NSCF", "NSUI", "__NS",
-                          "__CF", "Swi", "objc", "dis", "Blo", "Mac", "Pro", "Obj", "JSE"]
-            for i in 0..<Int(allClassCount) {
-                let name = String(cString: class_getName(classList[i]))
-                if name.count < 2 { continue }
-                let isSys = sysPfx.contains(where: { name.hasPrefix($0) })
-                if !isSys && !name.contains(".") { gameClasses.append(name) }
-            }
-            free(UnsafeMutableRawPointer(classList))
-        }
-        gameClasses.sort()
-        L.append("Total: \(allClassCount), Game: \(gameClasses.count)")
-        for gc in gameClasses { L.append("  \(gc)") }
-
-        L.append("")
-        L.append("-- CLASS METHODS --")
-        dumpClassMetadata(&L)
-
-        L.append("")
-        L.append("-- FRAMEWORKS --")
-        let imgCount = _dyld_image_count()
-        for i in 0..<imgCount {
-            guard let n = _dyld_get_image_name(i) else { continue }
-            let p = String(cString: n)
-            if !p.hasPrefix("/usr/") && !p.hasPrefix("/System/") && !p.hasPrefix("/Developer/") {
-                L.append("  \(p)")
-            }
-        }
 
         L.append("")
         L.append("-- DLSYM --")
@@ -413,15 +368,30 @@ class XRDOverlay: NSObject {
                 "_ZNK7cocos2d8Director15getRunningSceneEv",
                 "_ZN7cocos2d6Camera9setZoomXYEff",
                 "_ZN7cocos2d6Camera6setFOVEf",
+                "_ZN7cocos2d6Camera14setEyeXYZEfff",
+                "_ZN7cocos2d8Director13setProjectionENS0_10ProjectionE",
+                "_ZNK7cocos2d8Director10getWinSizeEv",
                 "_ZN2cc8Director11getInstanceEv",
                 "_ZN2cc4Node8setScaleEf",
-                "_ZN2ax8Director11getInstanceEv"
+                "_ZN2ax8Director11getInstanceEv",
+                "_ZN2ax4Node8setScaleEf"
             ]
             var any = false
             for s in syms {
-                if dlsym(h, s) != nil { L.append("  \(s) ✓"); any = true }
+                if dlsym(h, s) != nil { L.append("  \(s) YES"); any = true }
             }
             if !any { L.append("  (none)") }
+        }
+
+        L.append("")
+        L.append("-- FRAMEWORKS --")
+        let imgCount = _dyld_image_count()
+        for i in 0..<imgCount {
+            guard let n = _dyld_get_image_name(i) else { continue }
+            let p = String(cString: n)
+            if !p.hasPrefix("/usr/") && !p.hasPrefix("/System/") && !p.hasPrefix("/Developer/") {
+                L.append("  \(p)")
+            }
         }
 
         L.append("")
@@ -455,94 +425,6 @@ class XRDOverlay: NSObject {
         return L.joined(separator: "\n")
     }
 
-    private func dumpViewTree(_ view: UIView, indent: Int, lines: inout [String], depth: Int, maxDepth: Int) {
-        guard depth < maxDepth else { return }
-        for sub in view.subviews {
-            let pad = String(repeating: "  ", count: indent)
-            let name = String(describing: type(of: sub))
-            let extra = sub.isHidden ? " [hidden]" : ""
-            lines.append("\(pad)\(name) \(Int(sub.frame.width))x\(Int(sub.frame.height))\(extra)")
-            dumpViewTree(sub, indent: indent + 1, lines: &lines, depth: depth + 1, maxDepth: maxDepth)
-        }
-    }
-
-    private func objcMethodNames(_ cls: AnyClass, instance: Bool = true) -> [String] {
-        let target: AnyClass = instance ? cls : object_getClass(cls)!
-        var count: UInt32 = 0
-        guard let methods = class_copyMethodList(target, &count) else { return [] }
-        defer { free(methods) }
-        var names: [String] = []
-        for i in 0..<Int(count) {
-            names.append(NSStringFromSelector(method_getName(methods[i])))
-        }
-        return names.sorted()
-    }
-
-    private func objcIvarNames(_ cls: AnyClass) -> [String] {
-        var count: UInt32 = 0
-        guard let ivars = class_copyIvarList(cls, &count) else { return [] }
-        defer { free(ivars) }
-        var names: [String] = []
-        for i in 0..<Int(count) {
-            if let n = ivar_getName(ivars[i]) { names.append(String(cString: n)) }
-        }
-        return names.sorted()
-    }
-
-    private func objcPropertyNames(_ cls: AnyClass) -> [String] {
-        var count: UInt32 = 0
-        guard let props = class_copyPropertyList(cls, &count) else { return [] }
-        defer { free(props) }
-        var names: [String] = []
-        for i in 0..<Int(count) {
-            names.append(String(cString: property_getName(props[i])))
-        }
-        return names.sorted()
-    }
-
-    private func dumpClassMetadata(_ L: inout [String]) {
-        let interesting = [
-            "CCDirector", "Director", "CCGLView_MCPlatform", "CCGLView",
-            "CCEAGLView", "EAGLView", "CCScene", "CCLayer", "CCNode",
-            "CCSprite", "CCCamera", "CCApplication", "CCScheduler",
-            "CCActionManager", "CCTextureCache", "CCDirectorCaller",
-            "AppController", "RootViewController"
-        ]
-        for name in interesting {
-            guard let cls = NSClassFromString(name) else { continue }
-            let cm = objcMethodNames(cls, instance: false)
-            let im = objcMethodNames(cls)
-            let props = objcPropertyNames(cls)
-            let ivars = objcIvarNames(cls)
-            L.append("\(name) +\(cm.count) -\(im.count) props=\(props.count) ivars=\(ivars.count)")
-            if !cm.isEmpty { L.append("  +: \(cm.joined(separator: ", "))") }
-            for m in im { L.append("  -\(m)") }
-            if !props.isEmpty { L.append("  props: \(props.joined(separator: ", "))") }
-            if !ivars.isEmpty { L.append("  ivars: \(ivars.joined(separator: ", "))") }
-        }
-
-        var classCount: UInt32 = 0
-        if let classList = objc_copyClassList(&classCount) {
-            var relevant: [String] = []
-            for i in 0..<Int(classCount) {
-                let n = String(cString: class_getName(classList[i]))
-                let nl = n.lowercased()
-                if nl.contains("camera") || nl.contains("ccscene") ||
-                   nl.contains("cclayer") || nl.contains("ccnode") ||
-                   nl.contains("ccsprite") || nl.contains("ccaction") ||
-                   nl.contains("cctexture") || nl.contains("ccrenderer") ||
-                   nl.contains("ccshader") {
-                    if !interesting.contains(n) { relevant.append(n) }
-                }
-            }
-            free(UnsafeMutableRawPointer(classList))
-            for cn in relevant.sorted() {
-                guard let cls = NSClassFromString(cn) else { continue }
-                let methods = objcMethodNames(cls)
-                L.append("\(cn)(\(methods.count)): \(methods.joined(separator: ", "))")
-            }
-        }
-    }
 }
 
 // MARK: - Zoom Engine
