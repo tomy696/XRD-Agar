@@ -2,71 +2,56 @@ import UIKit
 import WebKit
 
 class GameJSBridge: NSObject, WKScriptMessageHandler {
-    private weak var webView: WKWebView?
-    private var injected = false
+    private var injectedWebViews = NSHashTable<WKWebView>.weakObjects()
     private var scanTimer: Timer?
 
     private(set) var isConnected = false
     private(set) var statusInfo: String = "Scanning..."
+    private(set) var connectedURLs: [String] = []
+    private(set) var scannedCount: Int = 0
     var onConnected: (() -> Void)?
 
     func setup(in window: UIWindow) {
-        if let wv = findWebViewAnywhere() ?? findWebView(in: window) {
-            waitAndAttach(to: wv)
-            return
-        }
+        scanAndInject()
         var attempts = 0
         scanTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] timer in
             guard let self = self else { timer.invalidate(); return }
             attempts += 1
-            if let wv = self.findWebViewAnywhere() {
-                self.waitAndAttach(to: wv)
-                timer.invalidate()
-            } else if attempts >= 30 {
+            self.scanAndInject()
+            if attempts >= 60 && self.injectedWebViews.count == 0 {
                 self.statusInfo = "No WebView found"
                 timer.invalidate()
             }
         }
     }
 
-    private func findWebView(in view: UIView) -> WKWebView? {
-        if let wv = view as? WKWebView { return wv }
-        let className = String(describing: type(of: view))
-        if className.contains("WKWebView") || className.contains("WebView") {
-            if let wv = view as? WKWebView { return wv }
-        }
-        for sub in view.subviews {
-            if let found = findWebView(in: sub) { return found }
-        }
-        return nil
-    }
-
-    private func findWebViewAnywhere() -> WKWebView? {
+    private func scanAndInject() {
+        var found = 0
         for scene in UIApplication.shared.connectedScenes {
             guard let ws = scene as? UIWindowScene else { continue }
             for window in ws.windows {
-                if let wv = findWebView(in: window) { return wv }
+                found += injectAllWebViews(in: window)
             }
         }
-        return nil
+        scannedCount = found
     }
 
-    private func waitAndAttach(to wv: WKWebView) {
-        if wv.isLoading {
-            statusInfo = "WebView loading..."
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-                self?.waitAndAttach(to: wv)
+    private func injectAllWebViews(in view: UIView) -> Int {
+        var count = 0
+        if let wv = view as? WKWebView {
+            if !injectedWebViews.contains(wv) {
+                attach(to: wv)
+                count += 1
             }
-            return
         }
-        attach(to: wv)
+        for sub in view.subviews {
+            count += injectAllWebViews(in: sub)
+        }
+        return count
     }
 
     private func attach(to wv: WKWebView) {
-        guard !injected else { return }
-        webView = wv
-        injected = true
-        statusInfo = "Injecting JS..."
+        injectedWebViews.add(wv)
 
         wv.configuration.userContentController.add(self, name: "xrdBridge")
 
@@ -77,21 +62,63 @@ class GameJSBridge: NSObject, WKScriptMessageHandler {
 
         wv.evaluateJavaScript(jsCode) { [weak self] _, error in
             if let error = error {
-                self?.statusInfo = "JS error: \(error.localizedDescription.prefix(40))"
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-                    self?.retryEval(on: wv, js: jsCode)
+                let msg = error.localizedDescription.prefix(40)
+                self?.statusInfo = "JS err: \(msg)"
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    wv.evaluateJavaScript(jsCode) { _, _ in }
                 }
             }
         }
+
+        let url = wv.url?.absoluteString ?? "about:blank"
+        connectedURLs.append(String(url.prefix(80)))
+        statusInfo = "Injected \(injectedWebViews.count) WKWebView(s)"
     }
 
-    private func retryEval(on wv: WKWebView, js: String) {
-        wv.evaluateJavaScript(js) { [weak self] _, error in
-            if error != nil {
-                self?.statusInfo = "JS retry failed"
-            }
+    // MARK: - WKScriptMessageHandler
+
+    func userContentController(_ userContentController: WKUserContentController,
+                               didReceive message: WKScriptMessage) {
+        guard let body = message.body as? [String: Any],
+              let type = body["type"] as? String else { return }
+        let data = body["data"] as? String ?? ""
+
+        switch type {
+        case "serverURL":
+            NetworkInterceptor.shared.setManualServer(data)
+            statusInfo = "WS captured: \(String(data.prefix(40)))"
+        case "ready":
+            isConnected = true
+            statusInfo = "JS active (\(injectedWebViews.count) WV)"
+            onConnected?()
+        case "hooks":
+            statusInfo = "Hooks \(data) (\(injectedWebViews.count) WV)"
+        default:
+            break
         }
     }
+
+    // MARK: - JS calls
+
+    func setZoom(_ level: CGFloat) {
+        for wv in injectedWebViews.allObjects {
+            wv.evaluateJavaScript("typeof XRD !== 'undefined' && XRD.setZoom(\(level))") { _, _ in }
+        }
+    }
+
+    func setFeedInterval(_ ms: Int) {
+        for wv in injectedWebViews.allObjects {
+            wv.evaluateJavaScript("typeof XRD !== 'undefined' && XRD.setFeedInterval(\(ms))") { _, _ in }
+        }
+    }
+
+    func sendFeed() {
+        for wv in injectedWebViews.allObjects {
+            wv.evaluateJavaScript("typeof XRD !== 'undefined' && XRD.sendFeed()") { _, _ in }
+        }
+    }
+
+    // MARK: - JS loading
 
     private func loadJS() -> String {
         let bundle = Bundle(for: GameJSBridge.self)
@@ -106,46 +133,12 @@ class GameJSBridge: NSObject, WKScriptMessageHandler {
         return GameJSBridge.fallbackJS
     }
 
-    // MARK: - WKScriptMessageHandler
-
-    func userContentController(_ userContentController: WKUserContentController,
-                               didReceive message: WKScriptMessage) {
-        guard let body = message.body as? [String: Any],
-              let type = body["type"] as? String else { return }
-        let data = body["data"] as? String ?? ""
-
-        switch type {
-        case "serverURL":
-            NetworkInterceptor.shared.setManualServer(data)
-        case "ready":
-            isConnected = true
-            statusInfo = "JS active"
-            onConnected?()
-        case "hooks":
-            statusInfo = "Hooks \(data)"
-        default:
-            break
-        }
-    }
-
-    // MARK: - JS calls
-
-    func setZoom(_ level: CGFloat) {
-        webView?.evaluateJavaScript("XRD.setZoom(\(level))") { _, _ in }
-    }
-
-    func setFeedInterval(_ ms: Int) {
-        webView?.evaluateJavaScript("XRD.setFeedInterval(\(ms))") { _, _ in }
-    }
-
-    func sendFeed() {
-        webView?.evaluateJavaScript("XRD.sendFeed()") { _, _ in }
-    }
-
     // MARK: - Fallback inline JS (minimal zoom only)
 
     private static let fallbackJS = """
     (function(){
+        if(window._xrdInjected) return;
+        window._xrdInjected = true;
         var z=1,aws=null;
         var oSend=WebSocket.prototype.send;
         WebSocket.prototype.send=function(d){

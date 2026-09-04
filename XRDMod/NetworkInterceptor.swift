@@ -17,6 +17,10 @@ class NetworkInterceptor: NSObject {
     private let headersKey = "XRD_capturedHeaders"
     private let apiKey = "XRD_discoveredAPI"
 
+    private(set) var capturedURLLog: [String] = []
+    private(set) var capturedWSLog: [String] = []
+    private let maxLog = 50
+
     var discoveredAPIEndpoint: String? {
         get { defaults.string(forKey: apiKey) }
         set { defaults.set(newValue, forKey: apiKey) }
@@ -92,10 +96,32 @@ class NetworkInterceptor: NSObject {
            let swiz = class_getInstanceMethod(URLSession.self, swizzledWsReqSel) {
             method_exchangeImplementations(orig, swiz)
         }
+
+        let wsProtoSel = NSSelectorFromString("webSocketTaskWithURL:protocols:")
+        let swizzledWsProtoSel = NSSelectorFromString("xrd_webSocketTaskWithURL:protocols:")
+        if let orig = class_getInstanceMethod(URLSession.self, wsProtoSel),
+           let swiz = class_getInstanceMethod(URLSession.self, swizzledWsProtoSel) {
+            method_exchangeImplementations(orig, swiz)
+        }
+    }
+
+    private func logURL(_ url: String) {
+        DispatchQueue.main.async {
+            if self.capturedURLLog.count >= self.maxLog { self.capturedURLLog.removeFirst() }
+            self.capturedURLLog.append(url)
+        }
+    }
+
+    private func logWS(_ url: String) {
+        DispatchQueue.main.async {
+            if self.capturedWSLog.count >= self.maxLog { self.capturedWSLog.removeFirst() }
+            self.capturedWSLog.append(url)
+        }
     }
 
     func handleResponse(_ request: URLRequest, data: Data) {
         DispatchQueue.main.async { self.interceptedCount += 1 }
+        logURL(request.url?.absoluteString ?? "?")
 
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
 
@@ -104,14 +130,27 @@ class NetworkInterceptor: NSObject {
            let first = endpoints.first,
            let u = first["url"] as? String {
             serverURL = u
-        } else if let u = json["url"] as? String, u.contains("agar") || u.contains("wss") || u.contains(":") {
+        } else if let u = json["url"] as? String, (u.contains("ws") || u.contains(":") || u.contains("agar") || u.contains(".tech")) {
             serverURL = u
         } else if let u = json["server"] as? String {
             serverURL = u
+        } else if let u = json["host"] as? String {
+            serverURL = u
+        }
+
+        if serverURL == nil {
+            for (_, value) in json {
+                if let s = value as? String,
+                   (s.contains("agar") || s.contains("miniclip") || s.contains("tech.")) &&
+                   (s.contains("ws") || s.contains(":")) {
+                    serverURL = s
+                    break
+                }
+            }
         }
 
         if let raw = serverURL {
-            let wsURL = raw.hasPrefix("wss://") ? raw : "wss://\(raw)"
+            let wsURL = raw.hasPrefix("wss://") || raw.hasPrefix("ws://") ? raw : "wss://\(raw)"
             let token = (json["token"] as? String) ?? ""
             DispatchQueue.main.async {
                 self.capturedServerURL = wsURL
@@ -126,14 +165,17 @@ class NetworkInterceptor: NSObject {
 
     func handleWebSocketURL(_ url: URL, task: URLSessionWebSocketTask?) {
         let str = url.absoluteString
-        guard str.contains("agar") || str.contains("tech.") else { return }
+        logWS(str)
         DispatchQueue.main.async {
-            self.capturedServerURL = str
-            self.savedServerURL = str
-            if let task = task {
-                self.gameWebSocket = task
+            if str.contains("agar") || str.contains("tech.") || str.contains("miniclip") ||
+               str.contains("arena") || str.hasPrefix("wss://") {
+                self.capturedServerURL = str
+                self.savedServerURL = str
+                if let task = task {
+                    self.gameWebSocket = task
+                }
+                NotificationCenter.default.post(name: .xrdServerCaptured, object: nil)
             }
-            NotificationCenter.default.post(name: .xrdServerCaptured, object: nil)
         }
     }
 }
@@ -152,17 +194,9 @@ extension URLSession {
             return self.xrd_dataTask(with: request, completionHandler: completionHandler)
         }
 
-        let isPost = request.httpMethod?.uppercased() == "POST"
-        let urlStr = request.url?.absoluteString ?? ""
-        let mightBeAgar = isPost || urlStr.contains("agar") || urlStr.contains("miniclip")
-
-        guard mightBeAgar else {
-            return self.xrd_dataTask(with: request, completionHandler: completionHandler)
-        }
-
         let capturedReq = request
         let wrapped: (Data?, URLResponse?, Error?) -> Void = { data, resp, err in
-            if let data = data {
+            if let data = data, data.count > 0 {
                 NetworkInterceptor.shared.handleResponse(capturedReq, data: data)
             }
             completionHandler(data, resp, err)
@@ -184,6 +218,15 @@ extension URLSession {
         let task = self.xrd_wsTaskReq(with: request)
         if !NetworkInterceptor.shared.botSessions.contains(self),
            let url = request.url {
+            NetworkInterceptor.shared.handleWebSocketURL(url, task: task)
+        }
+        return task
+    }
+
+    @objc(xrd_webSocketTaskWithURL:protocols:)
+    func xrd_wsTaskProto(with url: URL, protocols: [String]) -> URLSessionWebSocketTask {
+        let task = self.xrd_wsTaskProto(with: url, protocols: protocols)
+        if !NetworkInterceptor.shared.botSessions.contains(self) {
             NetworkInterceptor.shared.handleWebSocketURL(url, task: task)
         }
         return task

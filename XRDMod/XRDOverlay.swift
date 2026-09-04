@@ -294,7 +294,7 @@ class XRDOverlay: NSObject {
 
     func debugDump() -> String {
         var L: [String] = []
-        L.append("=== XRD DUMP v6 ===")
+        L.append("=== XRD DUMP v7 ===")
 
         L.append("")
         L.append("-- APP --")
@@ -314,6 +314,7 @@ class XRDOverlay: NSObject {
         L.append("Zoom.status: \(zoomEngine.statusText)")
         L.append("Zoom.debug: \(zoomEngine.debugInfo)")
         L.append("JS: connected=\(jsBridge.isConnected) status=\(jsBridge.statusInfo)")
+        L.append("JS.scanned: \(jsBridge.scannedCount) urls: \(jsBridge.connectedURLs.joined(separator: " | "))")
         let ni = NetworkInterceptor.shared
         L.append("Net.server: \(ni.bestServerURL ?? "none")")
         L.append("Net.captured: \(ni.capturedServerURL ?? "none")")
@@ -321,6 +322,11 @@ class XRDOverlay: NSObject {
         L.append("Net.saved: \(ni.savedServerURL ?? "none")")
         L.append("Net.hasServer: \(ni.hasServer)")
         L.append("Net.intercepted: \(ni.interceptedCount)")
+        L.append("Net.apiEndpoint: \(ni.discoveredAPIEndpoint ?? "none")")
+        L.append("Net.urlLog(\(ni.capturedURLLog.count)):")
+        for u in ni.capturedURLLog.suffix(20) { L.append("  \(u)") }
+        L.append("Net.wsLog(\(ni.capturedWSLog.count)):")
+        for w in ni.capturedWSLog { L.append("  \(w)") }
         L.append("Bots: running=\(botEngine.isRunning) alive=\(botEngine.totalAlive)")
         L.append("Macro: on=\(settings.isMacroEnabled) power=\(settings.macroPower)")
 

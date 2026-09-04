@@ -1,6 +1,8 @@
 // XRD Agar.io Injection Script
 (function() {
     'use strict';
+    if(window._xrdInjected) return;
+    window._xrdInjected = true;
 
     var XRD = {
         zoomLevel: 1.0,
