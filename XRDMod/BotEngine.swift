@@ -9,6 +9,7 @@ class BotEngine: ObservableObject {
 
     weak var settings: GameSettings?
     var bots: [AgarBot] = []
+    var lastResolvedURL: String?
 
     private var targetX: Double = 0
     private var targetY: Double = 0
@@ -29,6 +30,7 @@ class BotEngine: ObservableObject {
             DispatchQueue.main.async {
                 switch result {
                 case .success(let info):
+                    self?.lastResolvedURL = info.url
                     self?.statusMessage = "Spawning..."
                     self?.spawnBots(config: config, serverInfo: info)
                     self?.startUIDDetection()

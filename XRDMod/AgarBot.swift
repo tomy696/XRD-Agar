@@ -34,7 +34,6 @@ class AgarBot: NSObject, Identifiable {
     private var moveTimer: Timer?
     private var isAlive: Bool = false
     private var respawnCount: Int = 0
-    private let maxRespawns: Int = 50
 
     init(name: String, serverURL: String, serverToken: String, action: BotAction) {
         self.name = name
@@ -236,7 +235,6 @@ class AgarBot: NSObject, Identifiable {
         moveTimer?.invalidate()
         moveTimer = nil
         respawnCount += 1
-        guard respawnCount < maxRespawns else { disconnect(); return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             self?.spawn()
         }

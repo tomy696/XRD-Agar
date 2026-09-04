@@ -73,6 +73,8 @@ class NetworkInterceptor: NSObject {
     }
 
     private(set) var bsdCapturedServer: String?
+    private(set) var capturedServerIP: String?
+    private(set) var capturedServerPort: Int?
 
     func install() {
         guard !installed else { return }
@@ -117,6 +119,12 @@ class NetworkInterceptor: NSObject {
         bsdCapturedServer = url
         capturedServerURL = url
         savedServerURL = url
+        if let ip = info["ip"] as? String {
+            capturedServerIP = ip
+        }
+        if let port = info["port"] as? Int {
+            capturedServerPort = port
+        }
         NotificationCenter.default.post(name: .xrdServerCaptured, object: nil)
     }
 

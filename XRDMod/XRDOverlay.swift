@@ -391,7 +391,7 @@ class XRDOverlay: NSObject {
 
     func debugDump() -> String {
         var L: [String] = []
-        L.append("=== XRD DUMP v12 ===")
+        L.append("=== XRD DUMP v13 ===")
 
         L.append("")
         L.append("-- APP --")
@@ -418,6 +418,8 @@ class XRDOverlay: NSObject {
         L.append("Net.bsd: \(ni.bsdCapturedServer ?? "none")")
         L.append("Net.manual: \(ni.manualServerURL ?? "none")")
         L.append("Net.saved: \(ni.savedServerURL ?? "none")")
+        L.append("Net.serverIP: \(ni.capturedServerIP ?? "none")")
+        L.append("Net.serverPort: \(ni.capturedServerPort.map { String($0) } ?? "none")")
         L.append("Net.hasServer: \(ni.hasServer)")
         L.append("Net.intercepted: \(ni.interceptedCount)")
         L.append("Net.apiEndpoint: \(ni.discoveredAPIEndpoint ?? "none")")
@@ -452,8 +454,9 @@ class XRDOverlay: NSObject {
         L.append("-- FEATURES --")
         L.append("Bots: running=\(botEngine.isRunning) alive=\(botEngine.totalAlive) spawned=\(botEngine.totalSpawned)")
         L.append("Bots.status: \(botEngine.statusMessage)")
+        L.append("Bots.lastURL: \(botEngine.lastResolvedURL ?? "none")")
         for (i, bot) in botEngine.bots.prefix(5).enumerated() {
-            L.append("  Bot[\(i)]: \(bot.state) err=\(bot.lastError)")
+            L.append("  Bot[\(i)]: \(bot.state) url=\(bot.serverURL) err=\(bot.lastError)")
         }
         L.append("Macro: on=\(settings.isMacroEnabled) power=\(settings.macroPower)")
 
