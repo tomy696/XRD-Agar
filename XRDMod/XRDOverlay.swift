@@ -269,7 +269,7 @@ class XRDOverlay: NSObject {
 
 // MARK: - Zoom Engine
 
-class ZoomEngine: ObservableObject {
+class ZoomEngine: NSObject, ObservableObject {
     enum Method: String {
         case engineHook = "Engine"
         case objcHook = "ObjC"
@@ -286,7 +286,11 @@ class ZoomEngine: ObservableObject {
     private var originalFrame: CGRect = .zero
 
     private var engineSetScale: ((Float) -> Void)?
-    private var zoomTimer: Timer?
+    private var displayLink: CADisplayLink?
+
+    deinit {
+        displayLink?.invalidate()
+    }
 
     func setup(window: UIWindow) {
         gameWindow = window
@@ -430,8 +434,8 @@ class ZoomEngine: ObservableObject {
     private func applyDisplayZoom(_ factor: CGFloat) {
         guard let view = gameView else { return }
 
-        zoomTimer?.invalidate()
-        zoomTimer = nil
+        displayLink?.invalidate()
+        displayLink = nil
 
         if abs(factor - 1.0) < 0.01 {
             view.transform = .identity
@@ -440,15 +444,19 @@ class ZoomEngine: ObservableObject {
 
         view.transform = CGAffineTransform(scaleX: factor, y: factor)
 
-        zoomTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self, weak view] _ in
-            guard let self = self, let view = view else { return }
-            if abs(self.currentZoom - 1.0) < 0.01 {
-                view.transform = .identity
-                self.zoomTimer?.invalidate()
-                self.zoomTimer = nil
-            } else {
-                view.transform = CGAffineTransform(scaleX: self.currentZoom, y: self.currentZoom)
-            }
+        let link = CADisplayLink(target: self, selector: #selector(displayLinkFired))
+        link.add(to: .main, forMode: .common)
+        displayLink = link
+    }
+
+    @objc private func displayLinkFired() {
+        guard let view = gameView else { return }
+        if abs(currentZoom - 1.0) < 0.01 {
+            view.transform = .identity
+            displayLink?.invalidate()
+            displayLink = nil
+        } else {
+            view.transform = CGAffineTransform(scaleX: currentZoom, y: currentZoom)
         }
     }
 
