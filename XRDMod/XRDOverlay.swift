@@ -257,232 +257,221 @@ class ZoomEngine: ObservableObject {
 
     @Published var currentZoom: CGFloat = 1.0
     @Published var activeMethod: Method = .displayZoom
-    @Published var statusText: String = "Initializing..."
+    @Published var statusText: String = "Searching..."
     @Published var debugInfo: String = ""
 
     private weak var gameWindow: UIWindow?
     private var gameView: UIView?
     private var originalFrame: CGRect = .zero
-    private var originalScaleFactor: CGFloat = 0
 
-    private var getInstanceFn: (() -> UnsafeMutableRawPointer)?
-    private var getSceneFn: ((UnsafeMutableRawPointer) -> UnsafeMutableRawPointer?)?
-    private var setScaleFn: ((UnsafeMutableRawPointer, Float) -> Void)?
-
-    private weak var objcDirector: AnyObject?
-    private var objcSceneSel: Selector?
-    private var objcSetScaleIMP: IMP?
+    private var engineSetScale: ((Float) -> Void)?
 
     func setup(window: UIWindow) {
         gameWindow = window
         gameView = findGameView(in: window)
+        if gameView == nil {
+            gameView = window.rootViewController?.view
+        }
         if let gv = gameView {
             originalFrame = gv.frame
-            originalScaleFactor = gv.contentScaleFactor
             debugInfo = String(describing: type(of: gv))
-        } else {
-            debugInfo = "no game view"
         }
 
-        if tryCocos2dCpp() {
+        if tryCppHooks() {
             activeMethod = .engineHook
             statusText = "Engine hook active"
             return
         }
-
-        if tryObjCDirector() {
+        if tryObjCHooks() {
             activeMethod = .objcHook
             statusText = "ObjC hook active"
             return
         }
 
         activeMethod = .displayZoom
-        statusText = gameView != nil ? "Display zoom ready" : "Zoom on root view"
+        statusText = "Display zoom"
 
-        if gameView == nil {
-            gameView = window.rootViewController?.view
-            if let gv = gameView {
-                originalFrame = gv.frame
-                originalScaleFactor = gv.contentScaleFactor
-                debugInfo = "rootVC: \(String(describing: type(of: gv)))"
-            }
+        let classes = scanEngineClasses()
+        if !classes.isEmpty {
+            debugInfo += " [" + classes.prefix(4).joined(separator: ",") + "]"
         }
     }
 
     func setZoom(_ factor: CGFloat) {
         currentZoom = factor
-        switch activeMethod {
-        case .engineHook:
-            applyEngineZoom(factor)
-        case .objcHook:
-            applyObjCZoom(factor)
-        case .displayZoom:
+        if let scale = engineSetScale {
+            scale(Float(factor))
+        } else {
             applyDisplayZoom(factor)
         }
     }
 
-    func reset() {
-        setZoom(1.0)
-    }
+    func reset() { setZoom(1.0) }
 
-    // MARK: - Strategy 1: C++ dlsym
+    // MARK: - C++ dlsym
 
-    private func tryCocos2dCpp() -> Bool {
+    private func tryCppHooks() -> Bool {
         guard let handle = dlopen(nil, RTLD_NOW) else { return false }
 
-        let namespaces = ["7cocos2d", "2ax", "2cc"]
+        let namespaces = ["7cocos2d", "2cc", "2ax", "5cocos", "6cocos2"]
         for ns in namespaces {
-            let giName = "_ZN\(ns)8Director11getInstanceEv"
-            guard let giSym = dlsym(handle, giName) else { continue }
-
-            typealias GIFn = @convention(c) () -> UnsafeMutableRawPointer
-            let gi = unsafeBitCast(giSym, to: GIFn.self)
-
-            let gsNames = [
-                "_ZNK\(ns)8Director15getRunningSceneEv",
-                "_ZN\(ns)8Director15getRunningSceneEv"
+            let dirGetters = [
+                "_ZN\(ns)8Director11getInstanceEv",
+                "_ZN\(ns)8Director14sharedDirectorEv"
             ]
-            var gsResolved: UnsafeMutableRawPointer?
-            for n in gsNames {
-                gsResolved = dlsym(handle, n)
-                if gsResolved != nil { break }
-            }
-            guard let gsSym = gsResolved else { continue }
+            var dSym: UnsafeMutableRawPointer?
+            for n in dirGetters { dSym = dlsym(handle, n); if dSym != nil { break } }
+            guard let dirSym = dSym else { continue }
 
-            let ssNames = [
+            let sceneGetters = [
+                "_ZNK\(ns)8Director15getRunningSceneEv",
+                "_ZN\(ns)8Director15getRunningSceneEv",
+                "_ZNK\(ns)8Director8getSceneEv"
+            ]
+            var sSym: UnsafeMutableRawPointer?
+            for n in sceneGetters { sSym = dlsym(handle, n); if sSym != nil { break } }
+            guard let sceneSym = sSym else { continue }
+
+            let scaleSetters = [
                 "_ZN\(ns)4Node8setScaleEf",
+                "_ZN\(ns)5Scene8setScaleEf",
                 "_ZN\(ns)4Node8setScaleEff"
             ]
-            var ssResolved: UnsafeMutableRawPointer?
-            for n in ssNames {
-                ssResolved = dlsym(handle, n)
-                if ssResolved != nil { break }
+            var scSym: UnsafeMutableRawPointer?
+            for n in scaleSetters { scSym = dlsym(handle, n); if scSym != nil { break } }
+            guard let scaleSym = scSym else { continue }
+
+            typealias GetDir = @convention(c) () -> UnsafeMutableRawPointer
+            typealias GetScene = @convention(c) (UnsafeMutableRawPointer) -> UnsafeMutableRawPointer?
+            typealias SetScale = @convention(c) (UnsafeMutableRawPointer, Float) -> Void
+
+            let getDir = unsafeBitCast(dirSym, to: GetDir.self)
+            let getScene = unsafeBitCast(sceneSym, to: GetScene.self)
+            let setScale = unsafeBitCast(scaleSym, to: SetScale.self)
+
+            let dir = getDir()
+            guard getScene(dir) != nil else { continue }
+
+            engineSetScale = { scale in
+                let d = getDir()
+                if let scene = getScene(d) { setScale(scene, scale) }
             }
-            guard let ssSym = ssResolved else { continue }
-
-            typealias GSFn = @convention(c) (UnsafeMutableRawPointer) -> UnsafeMutableRawPointer?
-            let gs = unsafeBitCast(gsSym, to: GSFn.self)
-            typealias SSFn = @convention(c) (UnsafeMutableRawPointer, Float) -> Void
-            let ss = unsafeBitCast(ssSym, to: SSFn.self)
-
-            let director = gi()
-            guard gs(director) != nil else { continue }
-
-            getInstanceFn = { gi() }
-            getSceneFn = gs
-            setScaleFn = ss
-            debugInfo = "C++ ns=\(ns)"
+            debugInfo = "C++ \(ns)"
             return true
         }
         return false
     }
 
-    private func applyEngineZoom(_ factor: CGFloat) {
-        guard let gi = getInstanceFn, let gs = getSceneFn, let ss = setScaleFn else { return }
-        let director = gi()
-        guard let scene = gs(director) else { return }
-        ss(scene, Float(1.0 / factor))
-    }
+    // MARK: - ObjC runtime
 
-    // MARK: - Strategy 2: ObjC runtime
-
-    private func tryObjCDirector() -> Bool {
-        let classNames = ["CCDirector", "Director", "CCEAGLView"]
-        let selectorNames = ["sharedDirector", "getInstance", "shared"]
+    private func tryObjCHooks() -> Bool {
+        let classNames = ["CCDirector", "Director", "CCDirectorCaller",
+                          "cocos2d.Director", "AppController"]
+        let singletons = ["sharedDirector", "getInstance", "shared"]
 
         for className in classNames {
             guard let cls = NSClassFromString(className) else { continue }
-            for selName in selectorNames {
+            for selName in singletons {
                 let sel = NSSelectorFromString(selName)
-                guard cls.responds(to: sel) else { continue }
-                guard let result = (cls as AnyObject).perform(sel) else { continue }
+                guard cls.responds(to: sel),
+                      let result = (cls as AnyObject).perform(sel) else { continue }
                 let director = result.takeUnretainedValue()
 
                 let sceneSel = NSSelectorFromString("runningScene")
-                guard director.responds(to: sceneSel) else { continue }
-                guard let sceneResult = director.perform(sceneSel) else { continue }
+                guard director.responds(to: sceneSel),
+                      let sceneResult = director.perform(sceneSel) else { continue }
                 let scene = sceneResult.takeUnretainedValue()
 
                 let scaleSel = NSSelectorFromString("setScale:")
-                guard scene.responds(to: scaleSel) else { continue }
+                guard scene.responds(to: scaleSel),
+                      let imp = class_getMethodImplementation(type(of: scene) as? AnyClass, scaleSel) else { continue }
 
-                guard let imp = class_getMethodImplementation(type(of: scene) as? AnyClass, scaleSel) else { continue }
+                let dirRef = director
+                let scSelCopy = sceneSel
 
-                objcDirector = director
-                objcSceneSel = sceneSel
-                objcSetScaleIMP = imp
-                debugInfo = "ObjC \(className).\(selName)"
+                engineSetScale = { scale in
+                    guard let sr = dirRef.perform(scSelCopy) else { return }
+                    let sc = sr.takeUnretainedValue()
+                    typealias Fn = @convention(c) (AnyObject, Selector, CGFloat) -> Void
+                    let fn = unsafeBitCast(imp, to: Fn.self)
+                    fn(sc, NSSelectorFromString("setScale:"), CGFloat(scale))
+                }
+                debugInfo = "ObjC \(className)"
                 return true
             }
         }
         return false
     }
 
-    private func applyObjCZoom(_ factor: CGFloat) {
-        guard let director = objcDirector,
-              let sceneSel = objcSceneSel,
-              let imp = objcSetScaleIMP else { return }
-
-        guard let sceneResult = director.perform(sceneSel) else { return }
-        let scene = sceneResult.takeUnretainedValue()
-
-        typealias SetScaleFn = @convention(c) (AnyObject, Selector, CGFloat) -> Void
-        let fn = unsafeBitCast(imp, to: SetScaleFn.self)
-        fn(scene, NSSelectorFromString("setScale:"), 1.0 / factor)
-    }
-
-    // MARK: - Strategy 3: Display zoom
+    // MARK: - Display zoom (fallback)
 
     private func applyDisplayZoom(_ factor: CGFloat) {
         guard let view = gameView else { return }
+
         if abs(factor - 1.0) < 0.01 {
             view.transform = .identity
+            view.frame = originalFrame
             return
         }
+
+        view.transform = .identity
+        let newW = originalFrame.width / factor
+        let newH = originalFrame.height / factor
+        view.frame = CGRect(
+            x: originalFrame.midX - newW / 2,
+            y: originalFrame.midY - newH / 2,
+            width: newW,
+            height: newH
+        )
         view.transform = CGAffineTransform(scaleX: factor, y: factor)
+    }
+
+    // MARK: - Class scan (debug)
+
+    private func scanEngineClasses() -> [String] {
+        var count: UInt32 = 0
+        guard let list = objc_copyClassList(&count) else { return [] }
+        defer { free(list) }
+        let hints = ["cocos", "eagl", "director", "glview", "metalview"]
+        var found: [String] = []
+        for i in 0..<Int(count) {
+            let name = String(cString: class_getName(list[i]))
+            if hints.contains(where: { name.lowercased().contains($0) }) {
+                found.append(name)
+            }
+        }
+        return found
     }
 
     // MARK: - Game view detection
 
     private func findGameView(in window: UIWindow) -> UIView? {
         guard let root = window.rootViewController?.view else { return nil }
-        let gameClassHints = [
-            "CCEAGL", "CCMetal", "CCRender",
-            "MTKView", "GLKView",
-            "EAGLView", "MetalView", "OpenGL",
-            "Cocos", "cocos"
-        ]
-        if let found = findViewByClass(root, hints: gameClassHints) {
-            return found
-        }
-        if let biggest = findBiggestOpaqueChild(root) {
-            return biggest
-        }
-        return nil
+        let hints = ["CCEAGL", "CCMetal", "CCRender", "MTKView", "GLKView",
+                     "EAGLView", "MetalView", "OpenGL", "Cocos", "cocos"]
+        if let found = findByClass(root, hints: hints) { return found }
+        return findBiggestOpaque(root)
     }
 
-    private func findViewByClass(_ view: UIView, hints: [String]) -> UIView? {
+    private func findByClass(_ view: UIView, hints: [String]) -> UIView? {
         let name = String(describing: type(of: view))
-        for hint in hints {
-            if name.localizedCaseInsensitiveContains(hint) { return view }
-        }
+        if hints.contains(where: { name.localizedCaseInsensitiveContains($0) }) { return view }
         for sub in view.subviews {
-            if let found = findViewByClass(sub, hints: hints) { return found }
+            if let found = findByClass(sub, hints: hints) { return found }
         }
         return nil
     }
 
-    private func findBiggestOpaqueChild(_ root: UIView) -> UIView? {
+    private func findBiggestOpaque(_ root: UIView) -> UIView? {
         let screenArea = UIScreen.main.bounds.width * UIScreen.main.bounds.height
         var best: UIView?
         var bestArea: CGFloat = 0
-        func scan(_ view: UIView) {
-            let area = view.bounds.width * view.bounds.height
-            if area > screenArea * 0.5 && area > bestArea && view !== root && view.isOpaque {
-                best = view
-                bestArea = area
+        func scan(_ v: UIView) {
+            let a = v.bounds.width * v.bounds.height
+            if a > screenArea * 0.5 && a > bestArea && v !== root && v.isOpaque {
+                best = v; bestArea = a
             }
-            for sub in view.subviews { scan(sub) }
+            v.subviews.forEach { scan($0) }
         }
         scan(root)
         return best
