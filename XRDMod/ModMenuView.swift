@@ -256,30 +256,36 @@ struct ModMenuView: View {
                 if zoomEngine.activeMethod == .jsHook {
                     HStack(spacing: 4) {
                         Circle().fill(Color.green).frame(width: 5, height: 5)
-                        Text("JS zoom - see more map")
+                        Text("JS zoom actif")
                             .font(.system(size: 8, design: .monospaced))
                             .foregroundColor(.green.opacity(0.8))
                     }
-                    Text("< 1x = zoom out (see further)")
+                    Text("< 1x = dezoom (voir plus loin)")
                         .font(.system(size: 7, design: .monospaced))
                         .foregroundColor(.gray.opacity(0.6))
                 } else if zoomEngine.activeMethod == .engineHook || zoomEngine.activeMethod == .objcHook {
                     HStack(spacing: 4) {
                         Circle().fill(Color.green).frame(width: 5, height: 5)
-                        Text("Engine hook - real zoom")
+                        Text("Engine hook actif")
                             .font(.system(size: 8, design: .monospaced))
                             .foregroundColor(.green.opacity(0.8))
                     }
                 } else {
                     HStack(spacing: 4) {
                         Circle().fill(Color.orange).frame(width: 5, height: 5)
-                        Text("Display zoom (fallback)")
+                        Text("Zoom visuel (fallback)")
                             .font(.system(size: 8, design: .monospaced))
                             .foregroundColor(.orange.opacity(0.8))
                     }
-                    Text("Searching for WebView...")
-                        .font(.system(size: 7, design: .monospaced))
-                        .foregroundColor(.gray.opacity(0.6))
+                    if !zoomEngine.debugInfo.isEmpty {
+                        Text(zoomEngine.debugInfo)
+                            .font(.system(size: 7, design: .monospaced))
+                            .foregroundColor(.gray.opacity(0.6))
+                    } else {
+                        Text("Recherche WebView...")
+                            .font(.system(size: 7, design: .monospaced))
+                            .foregroundColor(.gray.opacity(0.6))
+                    }
                 }
             }
             .sectionStyle()
@@ -351,12 +357,15 @@ struct ModMenuView: View {
     private var uidSection: some View {
         VStack(alignment: .leading, spacing: 5) {
             sectionHeader("YOUR UID")
+            Text("Ton ID en jeu (auto-detect via bots)")
+                .font(.system(size: 7, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.5))
             HStack(spacing: 4) {
-                Text("Name")
+                Text("Pseudo")
                     .font(.system(size: 8, weight: .bold, design: .monospaced))
                     .foregroundColor(.gray)
-                    .frame(width: 38, alignment: .leading)
-                TextField("Your IGN", text: $settings.playerName)
+                    .frame(width: 42, alignment: .leading)
+                TextField("Ton nom in-game", text: $settings.playerName)
                     .textFieldStyle(XRDTextFieldStyle())
             }
 
@@ -386,7 +395,7 @@ struct ModMenuView: View {
                     .cornerRadius(6)
                 }
             } else {
-                Text("Enter your name above, then launch bots")
+                Text("Mets ton pseudo, lance les bots = UID detect")
                     .font(.system(size: 7, design: .monospaced))
                     .foregroundColor(.orange.opacity(0.7))
             }
@@ -404,10 +413,13 @@ struct ModMenuView: View {
                 Circle()
                     .fill(NetworkInterceptor.shared.hasServer ? Color.green : Color.red)
                     .frame(width: 6, height: 6)
-                Text(NetworkInterceptor.shared.hasServer ? "OK" : "NONE")
+                Text(NetworkInterceptor.shared.hasServer ? "AUTO" : "NONE")
                     .font(.system(size: 7, weight: .bold, design: .monospaced))
                     .foregroundColor(NetworkInterceptor.shared.hasServer ? .green : .red)
             }
+            Text("Auto-capturé quand tu joues")
+                .font(.system(size: 7, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.5))
 
             if let url = NetworkInterceptor.shared.bestServerURL {
                 Text(String(url.prefix(35)))
@@ -417,7 +429,7 @@ struct ModMenuView: View {
             }
 
             if !NetworkInterceptor.shared.hasServer {
-                Text("Play a game first OR paste URL:")
+                Text("Joue une partie = serveur auto-detect")
                     .font(.system(size: 7, design: .monospaced))
                     .foregroundColor(.orange.opacity(0.7))
 

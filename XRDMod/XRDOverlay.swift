@@ -45,11 +45,13 @@ class XRDOverlay: NSObject {
             self.jsBridge.setup(in: mainWindow)
             self.zoomEngine.jsBridge = self.jsBridge
             self.zoomEngine.setup(window: mainWindow)
+            self.zoomEngine.debugInfo = self.jsBridge.statusInfo
 
             self.jsBridge.onConnected = { [weak self] in
                 guard let self = self else { return }
                 self.zoomEngine.activeMethod = .jsHook
                 self.zoomEngine.statusText = "JS zoom active"
+                self.zoomEngine.debugInfo = self.jsBridge.statusInfo
                 if self.settings.isMacroEnabled {
                     let ms = Int(self.settings.feedInterval * 1000)
                     self.jsBridge.setFeedInterval(ms)
@@ -210,9 +212,9 @@ class XRDOverlay: NSObject {
         c.addSubview(btn)
         macroBtn = btn
 
-        let handleSize: CGFloat = 24
+        let handleSize: CGFloat = 36
         let handle = MacroDragHandle(frame: CGRect(
-            x: btn.frame.maxX + 4,
+            x: btn.frame.maxX + 6,
             y: btn.frame.midY - handleSize / 2,
             width: handleSize,
             height: handleSize
@@ -242,7 +244,7 @@ class XRDOverlay: NSObject {
         btn.center = CGPoint(x: cx, y: cy)
         btn.layer.cornerRadius = size / 2
         btn.setNeedsDisplay()
-        macroDragHandle?.center = CGPoint(x: btn.frame.maxX + 4 + 12, y: cy)
+        macroDragHandle?.center = CGPoint(x: btn.frame.maxX + 6 + 18, y: cy)
     }
 
     // MARK: - Menu
@@ -651,15 +653,15 @@ class MacroDragHandle: UIView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        backgroundColor = UIColor.white.withAlphaComponent(0.15)
+        backgroundColor = UIColor.black.withAlphaComponent(0.6)
         layer.cornerRadius = frame.width / 2
-        layer.borderWidth = 1
-        layer.borderColor = UIColor.white.withAlphaComponent(0.3).cgColor
+        layer.borderWidth = 2
+        layer.borderColor = UIColor(red: 0.2, green: 0.8, blue: 0.9, alpha: 0.9).cgColor
 
         let icon = UILabel(frame: bounds)
         icon.text = "✥"
-        icon.font = .systemFont(ofSize: 13)
-        icon.textColor = UIColor.white.withAlphaComponent(0.6)
+        icon.font = .systemFont(ofSize: 18, weight: .bold)
+        icon.textColor = UIColor(red: 0.2, green: 0.8, blue: 0.9, alpha: 1.0)
         icon.textAlignment = .center
         icon.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         addSubview(icon)

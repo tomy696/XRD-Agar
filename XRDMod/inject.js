@@ -14,13 +14,25 @@
             this.hookCanvas();
             this.hookWebSocket();
             this.startPlayerScan();
-            this.notifyNative('ready', 'true');
+            this.notifyNative('ready', 'ok');
         },
 
-        // Prototype-level hook — works on ALL existing and future 2d contexts
         hookCanvas: function() {
             var self = this;
 
+            // Hook setTransform — catches camera set via ctx.setTransform(zoom,0,0,zoom,cx,cy)
+            var origSetTransform = CanvasRenderingContext2D.prototype.setTransform;
+            CanvasRenderingContext2D.prototype.setTransform = function(a, b, c, d, e, f) {
+                if (typeof a === 'number' && self.zoomLevel !== 1.0
+                    && this.canvas && this.canvas.width > 100
+                    && a === d && b === 0 && c === 0 && Math.abs(a) !== 1) {
+                    return origSetTransform.call(this,
+                        a * self.zoomLevel, b, c, d * self.zoomLevel, e, f);
+                }
+                return origSetTransform.call(this, a, b, c, d, e, f);
+            };
+
+            // Hook scale — catches camera set via ctx.scale(zoom, zoom)
             var origScale = CanvasRenderingContext2D.prototype.scale;
             CanvasRenderingContext2D.prototype.scale = function(x, y) {
                 if (self.zoomLevel !== 1.0 && this.canvas && this.canvas.width > 100) {
@@ -28,9 +40,43 @@
                 }
                 return origScale.call(this, x, y);
             };
+
+            // Hook WebGL viewport (if game uses WebGL)
+            try {
+                var WGL = WebGLRenderingContext.prototype;
+                var origViewport = WGL.viewport;
+                WGL.viewport = function(x, y, w, h) {
+                    if (self.zoomLevel !== 1.0) {
+                        var inv = 1.0 / self.zoomLevel;
+                        var nw = Math.round(w * inv);
+                        var nh = Math.round(h * inv);
+                        return origViewport.call(this,
+                            Math.round(x - (nw - w) / 2),
+                            Math.round(y - (nh - h) / 2), nw, nh);
+                    }
+                    return origViewport.call(this, x, y, w, h);
+                };
+            } catch (e) {}
+
+            try {
+                var WGL2 = WebGL2RenderingContext.prototype;
+                var origViewport2 = WGL2.viewport;
+                WGL2.viewport = function(x, y, w, h) {
+                    if (self.zoomLevel !== 1.0) {
+                        var inv = 1.0 / self.zoomLevel;
+                        var nw = Math.round(w * inv);
+                        var nh = Math.round(h * inv);
+                        return origViewport2.call(this,
+                            Math.round(x - (nw - w) / 2),
+                            Math.round(y - (nh - h) / 2), nw, nh);
+                    }
+                    return origViewport2.call(this, x, y, w, h);
+                };
+            } catch (e) {}
+
+            self.notifyNative('hooks', 'installed');
         },
 
-        // Hook WebSocket to intercept server URL and game data
         hookWebSocket: function() {
             var OrigWebSocket = window.WebSocket;
             var self = this;
@@ -146,12 +192,10 @@
             }, 500);
         },
 
-        // Called from native to set zoom
         setZoom: function(level) {
             this.zoomLevel = level;
         },
 
-        // Called from native to start/stop feed at given interval (ms), 0 = stop
         setFeedInterval: function(ms) {
             if (this.feedTimer) { clearInterval(this.feedTimer); this.feedTimer = null; }
             if (ms > 0) {
@@ -169,7 +213,6 @@
             }
         },
 
-        // Single feed from native
         sendFeed: function() {
             if (this.activeWS && this.activeWS.readyState === 1) {
                 var p = new ArrayBuffer(1);
