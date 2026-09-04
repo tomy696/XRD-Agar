@@ -293,7 +293,7 @@ class XRDOverlay: NSObject {
     func debugDump() -> String {
         var lines: [String] = []
         lines.append("=== XRD DEBUG DUMP ===")
-        lines.append("Version: 2.0")
+        lines.append("Version: 3.0")
         lines.append("")
 
         lines.append("-- ZOOM --")
@@ -347,6 +347,10 @@ class XRDOverlay: NSObject {
         let found = candidates.filter { NSClassFromString($0) != nil }
         lines.append("Found: \(found.joined(separator: ", "))")
         lines.append("")
+
+        lines.append("-- COCOS2D INTROSPECTION --")
+        dumpCocos2DIntrospection(&lines)
+        lines.append("")
         lines.append("=== END DUMP ===")
 
         return lines.joined(separator: "\n")
@@ -360,6 +364,175 @@ class XRDOverlay: NSObject {
             let extra = sub.isHidden ? " [hidden]" : ""
             lines.append("\(pad)\(name) \(Int(sub.frame.width))x\(Int(sub.frame.height))\(extra)")
             dumpViews(sub, indent: indent + 1, lines: &lines, depth: depth + 1, maxDepth: maxDepth)
+        }
+    }
+
+    private func objcMethodNames(_ cls: AnyClass, instance: Bool = true) -> [String] {
+        let target: AnyClass = instance ? cls : object_getClass(cls)!
+        var count: UInt32 = 0
+        guard let methods = class_copyMethodList(target, &count) else { return [] }
+        defer { free(methods) }
+        var names: [String] = []
+        for i in 0..<Int(count) {
+            names.append(NSStringFromSelector(method_getName(methods[i])))
+        }
+        return names.sorted()
+    }
+
+    private func dumpCocos2DIntrospection(_ lines: inout [String]) {
+        let dirClasses = ["CCDirector", "Director"]
+
+        for dcName in dirClasses {
+            guard let cls = NSClassFromString(dcName) else { continue }
+            let classMethods = objcMethodNames(cls, instance: false)
+            lines.append("\(dcName) +class(\(classMethods.count)):")
+            for m in classMethods { lines.append("  +\(m)") }
+
+            let instMethods = objcMethodNames(cls)
+            lines.append("\(dcName) -instance(\(instMethods.count)):")
+            for m in instMethods { lines.append("  -\(m)") }
+        }
+
+        let singletons = ["sharedDirector", "getInstance", "shared", "sharedInstance"]
+        for dcName in dirClasses {
+            guard let cls = NSClassFromString(dcName) else { continue }
+            for selName in singletons {
+                let sel = NSSelectorFromString(selName)
+                guard cls.responds(to: sel),
+                      let result = (cls as AnyObject).perform(sel) else { continue }
+                let director = result.takeUnretainedValue()
+                lines.append("Director singleton via: \(dcName).\(selName)")
+
+                let probes = ["getWinSize", "winSize", "getVisibleSize", "visibleSize",
+                              "getVisibleOrigin", "getDesignResolutionSize",
+                              "contentScaleFactor", "getContentScaleFactor",
+                              "zoomFactor", "getZoomFactor", "projection",
+                              "getDefaultCamera", "camera",
+                              "getOpenGLView", "openGLView",
+                              "getRunningScene", "runningScene"]
+                for p in probes {
+                    if director.responds(to: NSSelectorFromString(p)) {
+                        lines.append("  responds: \(p) ✓")
+                    }
+                }
+
+                let sizeSelectors = ["getWinSize", "winSize", "getVisibleSize",
+                                     "getDesignResolutionSize"]
+                for ss in sizeSelectors {
+                    guard director.responds(to: NSSelectorFromString(ss)) else { continue }
+                    let imp = class_getMethodImplementation(type(of: director), NSSelectorFromString(ss))!
+                    typealias SizeFn = @convention(c) (AnyObject, Selector) -> CGSize
+                    let fn = unsafeBitCast(imp, to: SizeFn.self)
+                    let s = fn(director, NSSelectorFromString(ss))
+                    lines.append("  \(ss) = \(Int(s.width))x\(Int(s.height))")
+                }
+
+                let sceneSelectors = ["runningScene", "getRunningScene", "scene", "_runningScene"]
+                for scSel in sceneSelectors {
+                    let sel = NSSelectorFromString(scSel)
+                    guard director.responds(to: sel),
+                          let sr = director.perform(sel) else { continue }
+                    let scene = sr.takeUnretainedValue()
+                    let sceneClass = String(describing: type(of: scene))
+                    lines.append("Scene class: \(sceneClass) (via \(scSel))")
+
+                    let sceneMethods = objcMethodNames(type(of: scene))
+                    lines.append("\(sceneClass) -instance(\(sceneMethods.count)):")
+                    for m in sceneMethods { lines.append("  -\(m)") }
+
+                    let cameraProbes = ["camera", "getCamera", "defaultCamera",
+                                        "_camera", "getDefaultCamera"]
+                    for cp in cameraProbes {
+                        guard scene.responds(to: NSSelectorFromString(cp)) else { continue }
+                        lines.append("  scene responds: \(cp) ✓")
+                        if let cr = scene.perform(NSSelectorFromString(cp)) {
+                            let cam = cr.takeUnretainedValue()
+                            let camClass = String(describing: type(of: cam))
+                            lines.append("  Camera class: \(camClass)")
+                            let camMethods = objcMethodNames(type(of: cam))
+                            lines.append("  \(camClass) -instance(\(camMethods.count)):")
+                            for m in camMethods { lines.append("    -\(m)") }
+                        }
+                    }
+
+                    let childSel = NSSelectorFromString("children")
+                    if scene.responds(to: childSel),
+                       let cr = scene.perform(childSel),
+                       let children = cr.takeUnretainedValue() as? NSArray {
+                        lines.append("  Scene children(\(children.count)):")
+                        for (i, child) in children.enumerated() where i < 10 {
+                            let childClass = String(describing: type(of: child))
+                            lines.append("    [\(i)] \(childClass)")
+                            guard let childType = type(of: child) as? AnyClass else { continue }
+                            let childMethods = objcMethodNames(childType)
+                            let zoomRelated = childMethods.filter { m in
+                                let ml = m.lowercased()
+                                return ml.contains("zoom") || ml.contains("camera") ||
+                                       ml.contains("scale") || ml.contains("anchor") ||
+                                       ml.contains("position") || ml.contains("size")
+                            }
+                            if !zoomRelated.isEmpty {
+                                for m in zoomRelated { lines.append("      -\(m)") }
+                            }
+                        }
+                    }
+                    break
+                }
+                break
+            }
+        }
+
+        var classCount: UInt32 = 0
+        if let classList = objc_copyClassList(&classCount) {
+            var relevant: [String] = []
+            for i in 0..<Int(classCount) {
+                let name = String(cString: class_getName(classList[i]))
+                let nl = name.lowercased()
+                if nl.contains("camera") || nl.contains("ccscene") ||
+                   nl.contains("cclayer") || nl.contains("ccnode") {
+                    relevant.append(name)
+                }
+            }
+            free(UnsafeMutableRawPointer(classList))
+            if !relevant.isEmpty {
+                lines.append("Relevant classes: \(relevant.joined(separator: ", "))")
+                for rName in relevant {
+                    guard let cls = NSClassFromString(rName) else { continue }
+                    let methods = objcMethodNames(cls)
+                    let filtered = methods.filter { m in
+                        let ml = m.lowercased()
+                        return ml.contains("zoom") || ml.contains("camera") ||
+                               ml.contains("scale") || ml.contains("eye") ||
+                               ml.contains("fov") || ml.contains("ortho") ||
+                               ml.contains("project") || ml.contains("viewport") ||
+                               ml.contains("resolution") || ml.contains("design") ||
+                               ml.contains("position") || ml.contains("anchor") ||
+                               ml.contains("contentsize") || ml.contains("near") ||
+                               ml.contains("far") || ml.contains("frustum")
+                    }
+                    if !filtered.isEmpty {
+                        lines.append("\(rName) zoom-related:")
+                        for m in filtered { lines.append("  -\(m)") }
+                    }
+                }
+            }
+        }
+
+        let glViewNames = ["CCGLView_MCPlatform", "CCGLView", "CCEAGLView"]
+        for gvName in glViewNames {
+            guard let cls = NSClassFromString(gvName) else { continue }
+            let methods = objcMethodNames(cls)
+            let filtered = methods.filter { m in
+                let ml = m.lowercased()
+                return ml.contains("resolution") || ml.contains("design") ||
+                       ml.contains("size") || ml.contains("scale") ||
+                       ml.contains("frame") || ml.contains("viewport") ||
+                       ml.contains("pixel")
+            }
+            if !filtered.isEmpty {
+                lines.append("\(gvName) relevant:")
+                for m in filtered { lines.append("  -\(m)") }
+            }
         }
     }
 }
