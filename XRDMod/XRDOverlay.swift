@@ -455,7 +455,7 @@ class XRDOverlay: NSObject {
         L.append("Bots: running=\(botEngine.isRunning) alive=\(botEngine.totalAlive) spawned=\(botEngine.totalSpawned)")
         L.append("Bots.status: \(botEngine.statusMessage)")
         L.append("Bots.lastURL: \(botEngine.lastResolvedURL ?? "none")")
-        L.append("Bots.capturedIP: \(net.capturedServerIP ?? "none"):\(net.capturedServerPort ?? 0)")
+        L.append("Bots.capturedIP: \(ni.capturedServerIP ?? "none"):\(ni.capturedServerPort ?? 0)")
         for (i, bot) in botEngine.bots.prefix(5).enumerated() {
             L.append("  Bot[\(i)]: \(bot.state) url=\(bot.serverURL) err=\(bot.lastError)")
         }
