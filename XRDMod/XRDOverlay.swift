@@ -2,6 +2,7 @@ import UIKit
 import SwiftUI
 import WebKit
 import Combine
+import MachO
 
 class XRDOverlay: NSObject {
     static let shared = XRDOverlay()
