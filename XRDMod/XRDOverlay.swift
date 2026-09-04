@@ -401,10 +401,7 @@ class XRDOverlay: NSObject {
             L.append("Transform: \(gv.transform)")
             L.append("ContentScale: \(gv.contentScaleFactor)")
             L.append("Layer: \(type(of: gv.layer))")
-            if let eagl = gv.layer as? CAEAGLLayer {
-                L.append("EAGLLayer.opaque: \(eagl.isOpaque)")
-                L.append("EAGLLayer.drawableProperties: \(eagl.drawableProperties ?? [:])")
-            }
+            L.append("LayerOpaque: \(gv.layer.isOpaque)")
             let gestures = gv.gestureRecognizers ?? []
             L.append("Gestures(\(gestures.count)):")
             for g in gestures {
@@ -692,7 +689,7 @@ class XRDOverlay: NSObject {
                 L.append("Director runtime class: \(NSStringFromClass(type(of: director)))")
 
                 let allProbes = [
-                    "getWinSize", "winSize", "getWinSizeInPixels", "winSizeInPixels",
+                    "getWinSize", "winSize", "getWinSizeInPixels",
                     "getVisibleSize", "visibleSize", "getVisibleOrigin",
                     "getDesignResolutionSize", "designResolutionSize",
                     "getFrameSize", "frameSize",
@@ -704,17 +701,13 @@ class XRDOverlay: NSObject {
                     "getRunningScene", "runningScene",
                     "getScheduler", "scheduler",
                     "getActionManager", "actionManager",
-                    "getTextureCache", "textureCache",
                     "isPaused", "paused", "animationInterval",
-                    "getNotificationNode", "notificationNode",
                     "totalFrames", "secondsPerFrame",
                     "setDesignResolutionSize:height:resolutionPolicy:",
                     "setContentScaleFactor:", "setZoomFactor:",
                     "setFrameSize:", "setViewport",
-                    "setAlphaBlending:", "setDepthTest:",
                     "setProjection:", "setGLDefaultValues",
-                    "reshapeProjection:", "createStatsLabel",
-                    "getCocos2dVersion", "cocos2dVersion"
+                    "reshapeProjection:", "getCocos2dVersion", "cocos2dVersion"
                 ]
                 for p in allProbes {
                     if director.responds(to: NSSelectorFromString(p)) {
@@ -722,82 +715,16 @@ class XRDOverlay: NSObject {
                     }
                 }
 
-                let sizeGetters = ["getWinSize", "winSize", "getWinSizeInPixels",
-                                   "getVisibleSize", "getDesignResolutionSize",
-                                   "getFrameSize", "frameSize"]
-                for sg in sizeGetters {
-                    guard director.responds(to: NSSelectorFromString(sg)) else { continue }
-                    if let imp = class_getMethodImplementation(type(of: director), NSSelectorFromString(sg)) {
-                        typealias SizeFn = @convention(c) (AnyObject, Selector) -> CGSize
-                        let fn = unsafeBitCast(imp, to: SizeFn.self)
-                        let s = fn(director, NSSelectorFromString(sg))
-                        L.append("  \(sg) = \(s.width)x\(s.height)")
-                    }
-                }
-
-                let floatGetters = ["contentScaleFactor", "getContentScaleFactor",
-                                    "zoomFactor", "getZoomFactor",
-                                    "animationInterval", "secondsPerFrame"]
-                for fg in floatGetters {
-                    guard director.responds(to: NSSelectorFromString(fg)) else { continue }
-                    if let imp = class_getMethodImplementation(type(of: director), NSSelectorFromString(fg)) {
-                        typealias FloatFn = @convention(c) (AnyObject, Selector) -> CGFloat
-                        let fn = unsafeBitCast(imp, to: FloatFn.self)
-                        let v = fn(director, NSSelectorFromString(fg))
-                        L.append("  \(fg) = \(v)")
-                    }
-                }
-
-                let intGetters = ["projection", "getProjection", "totalFrames"]
-                for ig in intGetters {
-                    guard director.responds(to: NSSelectorFromString(ig)) else { continue }
-                    if let imp = class_getMethodImplementation(type(of: director), NSSelectorFromString(ig)) {
-                        typealias IntFn = @convention(c) (AnyObject, Selector) -> Int
-                        let fn = unsafeBitCast(imp, to: IntFn.self)
-                        let v = fn(director, NSSelectorFromString(ig))
-                        L.append("  \(ig) = \(v)")
-                    }
-                }
-
-                if director.responds(to: NSSelectorFromString("getCocos2dVersion")),
-                   let vr = director.perform(NSSelectorFromString("getCocos2dVersion")),
-                   let vs = vr.takeUnretainedValue() as? String {
-                    L.append("  cocos2dVersion = \(vs)")
-                }
-
-                if director.responds(to: NSSelectorFromString("getOpenGLView")),
-                   let glr = director.perform(NSSelectorFromString("getOpenGLView")) {
-                    let glView = glr.takeUnretainedValue()
-                    let glClass = NSStringFromClass(type(of: glView))
-                    L.append("  openGLView class: \(glClass)")
-                    let glMethods = objcMethodNames(type(of: glView))
-                    L.append("  \(glClass) -inst(\(glMethods.count)):")
-                    for m in glMethods { L.append("    -\(m)") }
-                    let glProps = objcPropertyNames(type(of: glView))
-                    if !glProps.isEmpty { L.append("  \(glClass) props: \(glProps.joined(separator: ", "))") }
-
-                    let glSizeGetters = ["getDesignResolutionSize", "designResolutionSize",
-                                         "getFrameSize", "frameSize", "surfaceSize"]
-                    for gs in glSizeGetters {
-                        guard (glView as AnyObject).responds(to: NSSelectorFromString(gs)) else { continue }
-                        if let imp = class_getMethodImplementation(type(of: glView), NSSelectorFromString(gs)) {
-                            typealias SizeFn = @convention(c) (AnyObject, Selector) -> CGSize
-                            let fn = unsafeBitCast(imp, to: SizeFn.self)
-                            let s = fn(glView as AnyObject, NSSelectorFromString(gs))
-                            L.append("  glView.\(gs) = \(s.width)x\(s.height)")
-                        }
-                    }
-                }
-
                 let sceneSelectors = ["runningScene", "getRunningScene", "scene", "_runningScene"]
                 for scSel in sceneSelectors {
-                    let sel = NSSelectorFromString(scSel)
-                    guard director.responds(to: sel),
-                          let sr = director.perform(sel) else { continue }
+                    guard director.responds(to: NSSelectorFromString(scSel)) else { continue }
+                    L.append("  director has: \(scSel)")
+
+                    guard let sr = director.perform(NSSelectorFromString(scSel)) else { continue }
                     let scene = sr.takeUnretainedValue()
                     let sceneClass = NSStringFromClass(type(of: scene))
                     L.append("")
-                    L.append("Scene: \(sceneClass) (via \(scSel))")
+                    L.append("Scene: \(sceneClass)")
 
                     let sceneMethods = objcMethodNames(type(of: scene))
                     L.append("\(sceneClass) -inst(\(sceneMethods.count)):")
@@ -807,86 +734,32 @@ class XRDOverlay: NSObject {
                     let sceneIvars = objcIvarNames(type(of: scene))
                     if !sceneIvars.isEmpty { L.append("\(sceneClass) ivars: \(sceneIvars.joined(separator: ", "))") }
 
-                    let sceneValueProbes = ["scale", "scaleX", "scaleY",
-                                            "anchorPoint", "position", "contentSize",
-                                            "zOrder", "tag", "name", "visible", "running"]
-                    for sp in sceneValueProbes {
-                        guard (scene as AnyObject).responds(to: NSSelectorFromString(sp)) else { continue }
-                        if let imp = class_getMethodImplementation(type(of: scene), NSSelectorFromString(sp)) {
-                            if sp == "anchorPoint" || sp == "position" {
-                                typealias PtFn = @convention(c) (AnyObject, Selector) -> CGPoint
-                                let fn = unsafeBitCast(imp, to: PtFn.self)
-                                let v = fn(scene as AnyObject, NSSelectorFromString(sp))
-                                L.append("  scene.\(sp) = \(v)")
-                            } else if sp == "contentSize" {
-                                typealias SzFn = @convention(c) (AnyObject, Selector) -> CGSize
-                                let fn = unsafeBitCast(imp, to: SzFn.self)
-                                let v = fn(scene as AnyObject, NSSelectorFromString(sp))
-                                L.append("  scene.\(sp) = \(v)")
-                            } else if sp == "scale" || sp == "scaleX" || sp == "scaleY" {
-                                typealias FlFn = @convention(c) (AnyObject, Selector) -> CGFloat
-                                let fn = unsafeBitCast(imp, to: FlFn.self)
-                                let v = fn(scene as AnyObject, NSSelectorFromString(sp))
-                                L.append("  scene.\(sp) = \(v)")
-                            } else if sp == "zOrder" || sp == "tag" {
-                                typealias IntFn = @convention(c) (AnyObject, Selector) -> Int
-                                let fn = unsafeBitCast(imp, to: IntFn.self)
-                                let v = fn(scene as AnyObject, NSSelectorFromString(sp))
-                                L.append("  scene.\(sp) = \(v)")
-                            }
+                    let sceneProbes = ["camera", "getCamera", "defaultCamera",
+                                       "_camera", "getDefaultCamera",
+                                       "scale", "scaleX", "scaleY", "setScale:",
+                                       "anchorPoint", "position", "contentSize",
+                                       "children", "childrenCount", "getChildrenCount",
+                                       "zOrder", "tag", "name", "visible", "running"]
+                    for sp in sceneProbes {
+                        if (scene as AnyObject).responds(to: NSSelectorFromString(sp)) {
+                            L.append("  scene responds: \(sp) ✓")
                         }
                     }
 
-                    let cameraProbes = ["camera", "getCamera", "defaultCamera",
-                                        "_camera", "getDefaultCamera"]
-                    for cp in cameraProbes {
-                        guard (scene as AnyObject).responds(to: NSSelectorFromString(cp)) else { continue }
-                        L.append("  scene.\(cp) ✓")
-                        if let cr = (scene as AnyObject).perform(NSSelectorFromString(cp)) {
-                            let cam = cr.takeUnretainedValue()
-                            let camClass = NSStringFromClass(type(of: cam))
-                            L.append("  Camera: \(camClass)")
-                            let camMethods = objcMethodNames(type(of: cam))
-                            L.append("  \(camClass) -inst(\(camMethods.count)):")
-                            for m in camMethods { L.append("    -\(m)") }
-                            let camProps = objcPropertyNames(type(of: cam))
-                            if !camProps.isEmpty { L.append("  \(camClass) props: \(camProps.joined(separator: ", "))") }
-                            let camIvars = objcIvarNames(type(of: cam))
-                            if !camIvars.isEmpty { L.append("  \(camClass) ivars: \(camIvars.joined(separator: ", "))") }
-                        }
-                    }
-
-                    let childSel = NSSelectorFromString("children")
-                    if (scene as AnyObject).responds(to: childSel),
-                       let cr = (scene as AnyObject).perform(childSel),
+                    if (scene as AnyObject).responds(to: NSSelectorFromString("children")),
+                       let cr = (scene as AnyObject).perform(NSSelectorFromString("children")),
                        let children = cr.takeUnretainedValue() as? NSArray {
-                        L.append("  children(\(children.count)):")
-                        for (i, child) in children.enumerated() where i < 20 {
+                        L.append("  children count: \(children.count)")
+                        for (i, child) in children.enumerated() where i < 15 {
                             guard let childType = type(of: child) as? AnyClass else { continue }
                             let childClass = NSStringFromClass(childType)
-                            var childInfo = "[\(i)] \(childClass)"
-                            if (child as AnyObject).responds(to: NSSelectorFromString("tag")) {
-                                if let imp = class_getMethodImplementation(childType, NSSelectorFromString("tag")) {
-                                    typealias IntFn = @convention(c) (AnyObject, Selector) -> Int
-                                    let fn = unsafeBitCast(imp, to: IntFn.self)
-                                    childInfo += " tag=\(fn(child as AnyObject, NSSelectorFromString("tag")))"
-                                }
-                            }
-                            L.append("    \(childInfo)")
-
+                            L.append("    [\(i)] \(childClass)")
                             let childMethods = objcMethodNames(childType)
-                            L.append("    \(childClass) -inst(\(childMethods.count)):")
-                            for m in childMethods { L.append("      -\(m)") }
-
-                            let subChildSel = NSSelectorFromString("children")
-                            if (child as AnyObject).responds(to: subChildSel),
-                               let scr = (child as AnyObject).perform(subChildSel),
-                               let subChildren = scr.takeUnretainedValue() as? NSArray, subChildren.count > 0 {
-                                L.append("      subchildren(\(subChildren.count)):")
-                                for (j, sc) in subChildren.enumerated() where j < 10 {
-                                    guard let scType = type(of: sc) as? AnyClass else { continue }
-                                    L.append("        [\(j)] \(NSStringFromClass(scType))")
-                                }
+                            if childMethods.count <= 30 {
+                                L.append("    methods: \(childMethods.joined(separator: ", "))")
+                            } else {
+                                L.append("    methods(\(childMethods.count)):")
+                                for m in childMethods { L.append("      -\(m)") }
                             }
                         }
                     }
@@ -898,7 +771,7 @@ class XRDOverlay: NSObject {
 
         var classCount: UInt32 = 0
         if let classList = objc_copyClassList(&classCount) {
-            var cameraClasses: [String] = []
+            var relevant: [String] = []
             for i in 0..<Int(classCount) {
                 let name = String(cString: class_getName(classList[i]))
                 let nl = name.lowercased()
@@ -907,19 +780,30 @@ class XRDOverlay: NSObject {
                    nl.contains("ccsprite") || nl.contains("ccaction") ||
                    nl.contains("cctexture") || nl.contains("ccrenderer") ||
                    nl.contains("ccglprogram") || nl.contains("ccshader") {
-                    cameraClasses.append(name)
+                    relevant.append(name)
                 }
             }
             free(UnsafeMutableRawPointer(classList))
-            if !cameraClasses.isEmpty {
+            if !relevant.isEmpty {
                 L.append("")
-                L.append("Cocos classes found: \(cameraClasses.sorted().joined(separator: ", "))")
-                for cn in cameraClasses.sorted() {
+                L.append("Cocos classes: \(relevant.sorted().joined(separator: ", "))")
+                for cn in relevant.sorted() {
                     guard let cls = NSClassFromString(cn) else { continue }
                     let methods = objcMethodNames(cls)
-                    L.append("\(cn) -inst(\(methods.count)): \(methods.joined(separator: ", "))")
+                    L.append("\(cn)(\(methods.count)): \(methods.joined(separator: ", "))")
                 }
             }
+        }
+
+        let glViewNames = ["CCGLView_MCPlatform", "CCGLView", "CCEAGLView"]
+        for gvName in glViewNames {
+            guard let cls = NSClassFromString(gvName) else { continue }
+            L.append("")
+            let methods = objcMethodNames(cls)
+            L.append("\(gvName) -inst(\(methods.count)):")
+            for m in methods { L.append("  -\(m)") }
+            let props = objcPropertyNames(cls)
+            if !props.isEmpty { L.append("\(gvName) props: \(props.joined(separator: ", "))") }
         }
     }
 }
