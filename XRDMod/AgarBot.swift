@@ -44,8 +44,11 @@ class AgarBot: NSObject, Identifiable {
         super.init()
     }
 
+    private(set) var lastError: String = ""
+
     func connect() {
         state = .connecting
+        lastError = ""
         let config = URLSessionConfiguration.default
         config.httpAdditionalHeaders = [
             "Origin": "https://agar.io",
@@ -55,13 +58,13 @@ class AgarBot: NSObject, Identifiable {
         if let s = session { NetworkInterceptor.shared.botSessions.add(s) }
 
         guard let url = URL(string: serverURL) else {
+            lastError = "Bad URL"
             state = .disconnected
             return
         }
 
         webSocket = session?.webSocketTask(with: url)
         webSocket?.resume()
-        sendHandshake()
         receiveLoop()
     }
 
@@ -244,10 +247,29 @@ extension AgarBot: URLSessionWebSocketDelegate {
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
                     didOpenWithProtocol protocol: String?) {
         state = .connected
+        sendHandshake()
     }
 
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
                     didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
+        lastError = "Closed: \(closeCode.rawValue)"
         disconnect()
+    }
+
+    func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge,
+                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+           let trust = challenge.protectionSpace.serverTrust {
+            completionHandler(.useCredential, URLCredential(trust: trust))
+        } else {
+            completionHandler(.performDefaultHandling, nil)
+        }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        if let error = error {
+            lastError = String(error.localizedDescription.prefix(60))
+            disconnect()
+        }
     }
 }

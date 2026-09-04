@@ -391,7 +391,7 @@ class XRDOverlay: NSObject {
 
     func debugDump() -> String {
         var L: [String] = []
-        L.append("=== XRD DUMP v10 ===")
+        L.append("=== XRD DUMP v11 ===")
 
         L.append("")
         L.append("-- APP --")
@@ -450,7 +450,11 @@ class XRDOverlay: NSObject {
 
         L.append("")
         L.append("-- FEATURES --")
-        L.append("Bots: running=\(botEngine.isRunning) alive=\(botEngine.totalAlive)")
+        L.append("Bots: running=\(botEngine.isRunning) alive=\(botEngine.totalAlive) spawned=\(botEngine.totalSpawned)")
+        L.append("Bots.status: \(botEngine.statusMessage)")
+        for (i, bot) in botEngine.bots.prefix(5).enumerated() {
+            L.append("  Bot[\(i)]: \(bot.state) err=\(bot.lastError)")
+        }
         L.append("Macro: on=\(settings.isMacroEnabled) power=\(settings.macroPower)")
 
         L.append("")
@@ -587,9 +591,11 @@ class ZoomEngine: NSObject, ObservableObject {
     var jsBridge: GameJSBridge?
     private var engineSetScale: ((Float) -> Void)?
     private var displayLink: CADisplayLink?
+    private var zoomEnforceTimer: Timer?
 
     deinit {
         displayLink?.invalidate()
+        zoomEnforceTimer?.invalidate()
     }
 
     func setup(window: UIWindow) {
@@ -624,14 +630,27 @@ class ZoomEngine: NSObject, ObservableObject {
 
     func setZoom(_ factor: CGFloat) {
         currentZoom = factor
+        zoomEnforceTimer?.invalidate()
+        zoomEnforceTimer = nil
+
         if let hook = engineSetScale {
             hook(Float(factor))
+            if abs(factor - 1.0) > 0.01 {
+                zoomEnforceTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+                    guard let self = self, let hook = self.engineSetScale else { return }
+                    hook(Float(self.currentZoom))
+                }
+            }
         } else {
             applyDisplayZoom(factor)
         }
     }
 
-    func reset() { setZoom(1.0) }
+    func reset() {
+        zoomEnforceTimer?.invalidate()
+        zoomEnforceTimer = nil
+        setZoom(1.0)
+    }
 
     // MARK: - C++ dlsym
 

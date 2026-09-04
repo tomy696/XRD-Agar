@@ -119,11 +119,12 @@ extension BotEngine: AgarBotDelegate {
             case .dead:
                 self?.statusMessage = "Respawning..."
             case .disconnected:
+                let err = bot.lastError
                 self?.bots.removeAll { $0.id == bot.id }
                 self?.recountAlive()
                 if self?.bots.isEmpty == true {
                     self?.isRunning = false
-                    self?.statusMessage = "All disconnected"
+                    self?.statusMessage = err.isEmpty ? "All disconnected" : "Error: \(err)"
                 }
             default: break
             }

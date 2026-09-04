@@ -115,11 +115,9 @@ class NetworkInterceptor: NSObject {
         guard let info = notif.userInfo,
               let url = info["url"] as? String else { return }
         bsdCapturedServer = url
-        if capturedServerURL == nil {
-            capturedServerURL = url
-            savedServerURL = url
-            NotificationCenter.default.post(name: .xrdServerCaptured, object: nil)
-        }
+        capturedServerURL = url
+        savedServerURL = url
+        NotificationCenter.default.post(name: .xrdServerCaptured, object: nil)
     }
 
     private func logURL(_ url: String) {

@@ -117,22 +117,18 @@ int xrd_connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
                         postNotificationName:kNotif object:nil
                         userInfo:@{@"url": wsURL, @"ip": cleanIP,
                                    @"port": @(port), @"host": hostname}];
-                } else if (!isAd && !hostname) {
-                    // Direct IP connection (no DNS) = game server candidate
+                } else if (!isAd && !hostname && port > 10000) {
                     NSString *candidate = [NSString stringWithFormat:@"%@:%d", cleanIP, port];
                     if (g_candidates.count >= 50) [g_candidates removeObjectAtIndex:0];
                     [g_candidates addObject:candidate];
                     [[NSUserDefaults standardUserDefaults] setObject:[g_candidates copy] forKey:kCandidatesKey];
 
-                    // Auto-promote: if no confirmed server yet, use first candidate
-                    if (![[NSUserDefaults standardUserDefaults] stringForKey:@"XRD_bsdServer"]) {
-                        NSString *wsURL = [NSString stringWithFormat:@"wss://%@:%d", cleanIP, port];
-                        [[NSUserDefaults standardUserDefaults] setObject:wsURL forKey:@"XRD_bsdServer"];
-                        [[NSNotificationCenter defaultCenter]
-                            postNotificationName:kNotif object:nil
-                            userInfo:@{@"url": wsURL, @"ip": cleanIP,
-                                       @"port": @(port), @"host": @"(direct-ip)"}];
-                    }
+                    NSString *wsURL = [NSString stringWithFormat:@"wss://%@:%d", cleanIP, port];
+                    [[NSUserDefaults standardUserDefaults] setObject:wsURL forKey:@"XRD_bsdServer"];
+                    [[NSNotificationCenter defaultCenter]
+                        postNotificationName:kNotif object:nil
+                        userInfo:@{@"url": wsURL, @"ip": cleanIP,
+                                   @"port": @(port), @"host": @"(direct-ip)"}];
                 }
 
                 if (g_conns.count % 5 == 0) {
