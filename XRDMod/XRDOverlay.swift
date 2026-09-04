@@ -8,6 +8,7 @@ class XRDOverlay: NSObject {
     let settings = GameSettings()
     let botEngine = BotEngine()
     let zoomEngine = ZoomEngine()
+    let jsBridge = GameJSBridge()
 
     private weak var gameWindow: UIWindow?
     private var container: XRDPassthroughView?
@@ -40,7 +41,20 @@ class XRDOverlay: NSObject {
         setupObservers()
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-            self?.zoomEngine.setup(window: mainWindow)
+            guard let self = self else { return }
+            self.jsBridge.setup(in: mainWindow)
+            self.zoomEngine.jsBridge = self.jsBridge
+            self.zoomEngine.setup(window: mainWindow)
+
+            self.jsBridge.onConnected = { [weak self] in
+                guard let self = self else { return }
+                self.zoomEngine.activeMethod = .jsHook
+                self.zoomEngine.statusText = "JS zoom active"
+                if self.settings.isMacroEnabled {
+                    let ms = Int(self.settings.feedInterval * 1000)
+                    self.jsBridge.setFeedInterval(ms)
+                }
+            }
         }
 
         if LicenseManager.shared.isValid {
@@ -119,14 +133,25 @@ class XRDOverlay: NSObject {
     private func startFeedTimer() {
         feedTimer?.invalidate()
         let interval = settings.feedInterval
-        feedTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
-            NetworkInterceptor.shared.sendFeed()
+        if jsBridge.isConnected {
+            jsBridge.setFeedInterval(Int(interval * 1000))
+            return
+        }
+        feedTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            if let bridge = self?.jsBridge, bridge.isConnected {
+                bridge.sendFeed()
+            } else {
+                NetworkInterceptor.shared.sendFeed()
+            }
         }
     }
 
     private func stopFeedTimer() {
         feedTimer?.invalidate()
         feedTimer = nil
+        if jsBridge.isConnected {
+            jsBridge.setFeedInterval(0)
+        }
     }
 
     // MARK: - License
@@ -273,6 +298,7 @@ class ZoomEngine: NSObject, ObservableObject {
     enum Method: String {
         case engineHook = "Engine"
         case objcHook = "ObjC"
+        case jsHook = "JS Canvas"
         case displayZoom = "Display"
     }
 
@@ -285,6 +311,7 @@ class ZoomEngine: NSObject, ObservableObject {
     private var gameView: UIView?
     private var originalFrame: CGRect = .zero
 
+    var jsBridge: GameJSBridge?
     private var engineSetScale: ((Float) -> Void)?
     private var displayLink: CADisplayLink?
 
@@ -327,6 +354,12 @@ class ZoomEngine: NSObject, ObservableObject {
         currentZoom = factor
         if let scale = engineSetScale {
             scale(Float(factor))
+        } else if let bridge = jsBridge, bridge.isConnected {
+            bridge.setZoom(factor)
+            if activeMethod != .jsHook {
+                activeMethod = .jsHook
+                statusText = "JS zoom active"
+            }
         } else {
             applyDisplayZoom(factor)
         }

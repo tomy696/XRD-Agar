@@ -253,7 +253,17 @@ struct ModMenuView: View {
             .sectionStyle()
 
             VStack(alignment: .leading, spacing: 4) {
-                if zoomEngine.activeMethod == .engineHook || zoomEngine.activeMethod == .objcHook {
+                if zoomEngine.activeMethod == .jsHook {
+                    HStack(spacing: 4) {
+                        Circle().fill(Color.green).frame(width: 5, height: 5)
+                        Text("JS zoom - see more map")
+                            .font(.system(size: 8, design: .monospaced))
+                            .foregroundColor(.green.opacity(0.8))
+                    }
+                    Text("< 1x = zoom out (see further)")
+                        .font(.system(size: 7, design: .monospaced))
+                        .foregroundColor(.gray.opacity(0.6))
+                } else if zoomEngine.activeMethod == .engineHook || zoomEngine.activeMethod == .objcHook {
                     HStack(spacing: 4) {
                         Circle().fill(Color.green).frame(width: 5, height: 5)
                         Text("Engine hook - real zoom")
@@ -262,12 +272,12 @@ struct ModMenuView: View {
                     }
                 } else {
                     HStack(spacing: 4) {
-                        Circle().fill(Color.cyan).frame(width: 5, height: 5)
-                        Text("Display zoom")
+                        Circle().fill(Color.orange).frame(width: 5, height: 5)
+                        Text("Display zoom (fallback)")
                             .font(.system(size: 8, design: .monospaced))
-                            .foregroundColor(.cyan.opacity(0.8))
+                            .foregroundColor(.orange.opacity(0.8))
                     }
-                    Text("< 1x = zoom out, > 1x = zoom in")
+                    Text("Searching for WebView...")
                         .font(.system(size: 7, design: .monospaced))
                         .foregroundColor(.gray.opacity(0.6))
                 }
