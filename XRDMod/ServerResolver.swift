@@ -18,8 +18,10 @@ class ServerResolver {
 
     static func resolveHostname(forIP ip: String, port: Int, completion: @escaping (String) -> Void) {
         let cleanIP = ip.hasPrefix("::ffff:") ? String(ip.dropFirst(7)) : ip
+        let ipParts = cleanIP.split(separator: ".")
         let group = DispatchGroup()
         var matchedHostname: String?
+        var subnetHostname: String?
         let lock = NSLock()
 
         for region in gameRegions {
@@ -43,12 +45,19 @@ class ServerResolver {
                         var sin6 = withUnsafePointer(to: &storage) { $0.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { $0.pointee } }
                         inet_ntop(AF_INET6, &sin6.sin6_addr, &buf, socklen_t(INET6_ADDRSTRLEN))
                     }
-                    let resolved = String(cString: buf)
-                    let cleanResolved = resolved.hasPrefix("::ffff:") ? String(resolved.dropFirst(7)) : resolved
+                    let resolvedStr = String(cString: buf)
+                    let cleanResolved = resolvedStr.hasPrefix("::ffff:") ? String(resolvedStr.dropFirst(7)) : resolvedStr
                     if cleanResolved == cleanIP {
                         lock.lock()
                         matchedHostname = hostname
                         lock.unlock()
+                    } else if ipParts.count >= 2 {
+                        let resParts = cleanResolved.split(separator: ".")
+                        if resParts.count >= 2 && resParts[0] == ipParts[0] && resParts[1] == ipParts[1] {
+                            lock.lock()
+                            if subnetHostname == nil { subnetHostname = hostname }
+                            lock.unlock()
+                        }
                     }
                 }
             }
@@ -58,8 +67,11 @@ class ServerResolver {
         group.notify(queue: .main) {
             if let hostname = matchedHostname {
                 completion("wss://\(hostname):\(port)")
+            } else if let hostname = subnetHostname {
+                completion("wss://\(hostname):\(port)")
             } else {
-                completion("wss://\(cleanIP):\(port)")
+                let fallback = String(format: domainTemplate, gameRegions[0])
+                completion("wss://\(fallback):\(port)")
             }
         }
     }

@@ -391,7 +391,7 @@ class XRDOverlay: NSObject {
 
     func debugDump() -> String {
         var L: [String] = []
-        L.append("=== XRD DUMP v13 ===")
+        L.append("=== XRD DUMP v14 ===")
 
         L.append("")
         L.append("-- APP --")
@@ -455,6 +455,7 @@ class XRDOverlay: NSObject {
         L.append("Bots: running=\(botEngine.isRunning) alive=\(botEngine.totalAlive) spawned=\(botEngine.totalSpawned)")
         L.append("Bots.status: \(botEngine.statusMessage)")
         L.append("Bots.lastURL: \(botEngine.lastResolvedURL ?? "none")")
+        L.append("Bots.capturedIP: \(net.capturedServerIP ?? "none"):\(net.capturedServerPort ?? 0)")
         for (i, bot) in botEngine.bots.prefix(5).enumerated() {
             L.append("  Bot[\(i)]: \(bot.state) url=\(bot.serverURL) err=\(bot.lastError)")
         }
