@@ -68,7 +68,7 @@ class AgarBot: Identifiable {
         cleanup()
     }
 
-    // MARK: - Connection (blocking connect on background queue)
+    // MARK: - Connection (getaddrinfo + non-blocking connect + poll)
 
     func connect() {
         state = .connecting
@@ -78,12 +78,37 @@ class AgarBot: Identifiable {
         wsReady = false
         cancelled = false
 
-        AgarBot.log("[\(name)] connecting to \(serverIP):\(serverPort)")
+        AgarBot.log("[\(name)] v20 connecting to \(serverIP):\(serverPort)")
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self, !self.cancelled else { return }
 
-            let fd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
+            // getaddrinfo resolves IPv4 to NAT64 IPv6 on IPv6-only networks
+            var hints = addrinfo()
+            hints.ai_socktype = SOCK_STREAM
+            hints.ai_protocol = IPPROTO_TCP
+
+            var res: UnsafeMutablePointer<addrinfo>?
+            let portStr = "\(self.serverPort)"
+            let gaiRet = getaddrinfo(self.serverIP, portStr, &hints, &res)
+
+            guard gaiRet == 0, let ai = res else {
+                let errStr = gaiRet != 0 ? String(cString: gai_strerror(gaiRet)) : "nil"
+                AgarBot.log("[\(self.name)] getaddrinfo failed: \(errStr)")
+                if res != nil { freeaddrinfo(res) }
+                DispatchQueue.main.async {
+                    self.lastError = "resolve: \(errStr)"
+                    self.state = .disconnected
+                }
+                return
+            }
+            defer { freeaddrinfo(res) }
+
+            let family = ai.pointee.ai_family
+            let familyName = family == AF_INET6 ? "IPv6" : "IPv4"
+            AgarBot.log("[\(self.name)] resolved \(familyName)")
+
+            let fd = Darwin.socket(family, SOCK_STREAM, IPPROTO_TCP)
             guard fd >= 0 else {
                 let e = errno
                 AgarBot.log("[\(self.name)] socket() failed errno=\(e)")
@@ -94,48 +119,64 @@ class AgarBot: Identifiable {
                 return
             }
 
-            // prevent SIGPIPE crash
             var on: Int32 = 1
             setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
 
-            // 10s connect timeout via SO_SNDTIMEO
-            var tv = timeval(tv_sec: 10, tv_usec: 0)
-            setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+            // non-blocking for connect + poll timeout
+            let origFlags = fcntl(fd, F_GETFL, 0)
+            _ = fcntl(fd, F_SETFL, origFlags | O_NONBLOCK)
 
-            var addr = sockaddr_in()
-            addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-            addr.sin_family = sa_family_t(AF_INET)
-            addr.sin_port = UInt16(self.serverPort).bigEndian
+            AgarBot.log("[\(self.name)] connect() fd=\(fd) \(familyName)")
 
-            guard inet_pton(AF_INET, self.serverIP, &addr.sin_addr) == 1 else {
-                AgarBot.log("[\(self.name)] bad IP \(self.serverIP)")
+            let ret = Darwin.connect(fd, ai.pointee.ai_addr, ai.pointee.ai_addrlen)
+
+            if ret == 0 {
+                AgarBot.log("[\(self.name)] TCP connected instantly fd=\(fd)")
+                DispatchQueue.main.async {
+                    guard !self.cancelled else { Darwin.close(fd); return }
+                    self.sockfd = fd
+                    self.onTCPConnected()
+                }
+                return
+            }
+
+            guard errno == EINPROGRESS else {
+                let e = errno
+                AgarBot.log("[\(self.name)] connect errno=\(e) \(self.errnoName(e))")
                 Darwin.close(fd)
                 DispatchQueue.main.async {
-                    self.lastError = "bad IP"
+                    self.lastError = "connect \(self.errnoName(e))"
                     self.state = .disconnected
                 }
                 return
             }
 
-            AgarBot.log("[\(self.name)] calling connect() fd=\(fd)")
+            // poll for writability — real 10s timeout
+            var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+            let pollRet = poll(&pfd, 1, 10_000)
 
-            let ret = withUnsafePointer(to: &addr) { p in
-                p.withMemoryRebound(to: sockaddr.self, capacity: 1) { sp in
-                    Darwin.connect(fd, sp, socklen_t(MemoryLayout<sockaddr_in>.size))
-                }
-            }
-            let connectErrno = errno
+            guard !self.cancelled else { Darwin.close(fd); return }
 
-            guard !self.cancelled else {
+            if pollRet <= 0 {
+                AgarBot.log("[\(self.name)] connect timeout (poll \(pollRet))")
                 Darwin.close(fd)
+                DispatchQueue.main.async {
+                    self.lastError = "connect timeout"
+                    self.state = .disconnected
+                }
                 return
             }
 
-            if ret != 0 {
-                AgarBot.log("[\(self.name)] connect() failed errno=\(connectErrno) (\(self.errnoName(connectErrno)))")
+            // check actual connect result
+            var sockErr: Int32 = 0
+            var errLen = socklen_t(MemoryLayout<Int32>.size)
+            getsockopt(fd, SOL_SOCKET, SO_ERROR, &sockErr, &errLen)
+
+            if sockErr != 0 {
+                AgarBot.log("[\(self.name)] connect SO_ERROR=\(sockErr) \(self.errnoName(sockErr))")
                 Darwin.close(fd)
                 DispatchQueue.main.async {
-                    self.lastError = "connect errno=\(connectErrno) \(self.errnoName(connectErrno))"
+                    self.lastError = "connect \(self.errnoName(sockErr))"
                     self.state = .disconnected
                 }
                 return
@@ -144,10 +185,7 @@ class AgarBot: Identifiable {
             AgarBot.log("[\(self.name)] TCP connected! fd=\(fd)")
 
             DispatchQueue.main.async {
-                guard !self.cancelled else {
-                    Darwin.close(fd)
-                    return
-                }
+                guard !self.cancelled else { Darwin.close(fd); return }
                 self.sockfd = fd
                 self.onTCPConnected()
             }
