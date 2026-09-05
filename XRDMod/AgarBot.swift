@@ -1,5 +1,5 @@
 import Foundation
-import Network
+import Darwin.POSIX
 
 protocol AgarBotDelegate: AnyObject {
     func bot(_ bot: AgarBot, didUpdateState state: AgarBot.State)
@@ -29,7 +29,16 @@ class AgarBot: Identifiable {
     }
 
     private(set) var connMode: String = ""
-    private var connection: NWConnection?
+    private(set) var lastError: String = ""
+
+    private var sockfd: Int32 = -1
+    private var readSource: DispatchSourceRead?
+    private var writeSource: DispatchSourceWrite?
+    private var connectTimer: Timer?
+    private var upgradeTimer: Timer?
+    private var recvBuffer = Data()
+    private var wsReady = false
+
     private var targetPosition: (x: Double, y: Double)?
     private var ownIDs: [UInt32] = []
     private var cells: [UInt32: CellUpdate] = [:]
@@ -37,7 +46,6 @@ class AgarBot: Identifiable {
     private var moveTimer: Timer?
     private var isAlive: Bool = false
     private var respawnCount: Int = 0
-    private var fallbackTimer: Timer?
 
     init(name: String, serverIP: String, serverPort: Int, serverHostname: String, serverToken: String, action: BotAction) {
         self.name = name
@@ -48,122 +56,321 @@ class AgarBot: Identifiable {
         self.action = action
     }
 
-    private(set) var lastError: String = ""
+    deinit {
+        cleanup()
+    }
+
+    // MARK: - BSD Socket Connection
 
     func connect() {
         state = .connecting
         lastError = ""
-        tryConnect(mode: "wss")
-    }
+        connMode = "bsd"
+        recvBuffer.removeAll()
+        wsReady = false
 
-    private func tryConnect(mode: String) {
-        connection?.cancel()
-        connection = nil
-        fallbackTimer?.invalidate()
-        connMode = mode
-
-        guard let host = NWEndpoint.Host(serverIP) as NWEndpoint.Host?,
-              let port = NWEndpoint.Port(rawValue: UInt16(serverPort)) else {
-            lastError = "Bad IP/port"
+        sockfd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
+        guard sockfd >= 0 else {
+            lastError = "socket() errno=\(errno)"
             state = .disconnected
             return
         }
 
-        let params: NWParameters
-        switch mode {
-        case "wss":
-            let tlsOptions = NWProtocolTLS.Options()
-            sec_protocol_options_set_tls_server_name(tlsOptions.securityProtocolOptions, serverHostname)
-            sec_protocol_options_set_verify_block(tlsOptions.securityProtocolOptions, { _, _, cb in
-                cb(true)
-            }, DispatchQueue.main)
-            let wsOpts = NWProtocolWebSocket.Options()
-            wsOpts.autoReplyPing = true
-            wsOpts.setAdditionalHeaders([
-                ("Origin", "https://agar.io"),
-                ("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)")
-            ])
-            params = NWParameters(tls: tlsOptions)
-            params.defaultProtocolStack.applicationProtocols.insert(wsOpts, at: 0)
+        let flags = fcntl(sockfd, F_GETFL, 0)
+        if flags >= 0 { _ = fcntl(sockfd, F_SETFL, flags | O_NONBLOCK) }
 
-        case "ws":
-            let wsOpts = NWProtocolWebSocket.Options()
-            wsOpts.autoReplyPing = true
-            wsOpts.setAdditionalHeaders([
-                ("Origin", "https://agar.io"),
-                ("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)")
-            ])
-            params = NWParameters.tcp
-            params.defaultProtocolStack.applicationProtocols.insert(wsOpts, at: 0)
-
-        default: // "tcp"
-            params = NWParameters.tcp
+        var addr = sockaddr_in()
+        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = UInt16(serverPort).bigEndian
+        guard inet_pton(AF_INET, serverIP, &addr.sin_addr) == 1 else {
+            lastError = "Bad IP: \(serverIP)"
+            closeSock()
+            state = .disconnected
+            return
         }
 
-        let conn = NWConnection(host: host, port: port, using: params)
-        self.connection = conn
+        let ret = withUnsafePointer(to: &addr) { p in
+            p.withMemoryRebound(to: sockaddr.self, capacity: 1) { sp in
+                Darwin.connect(sockfd, sp, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
 
-        conn.stateUpdateHandler = { [weak self] newState in
+        if ret == 0 {
+            onTCPConnected()
+            return
+        }
+        if errno != EINPROGRESS {
+            lastError = "connect errno=\(errno)"
+            closeSock()
+            state = .disconnected
+            return
+        }
+
+        let ws = DispatchSource.makeWriteSource(fileDescriptor: sockfd, queue: .main)
+        self.writeSource = ws
+        ws.setEventHandler { [weak self] in
             guard let self = self else { return }
-            switch newState {
-            case .ready:
-                self.fallbackTimer?.invalidate()
-                self.fallbackTimer = nil
-                self.state = .connected
-                if mode == "tcp" {
-                    self.sendBinaryRaw(AgarProtocol.handshakePacket())
-                    self.sendBinaryRaw(AgarProtocol.connectionKeyPacket())
-                    if !self.serverToken.isEmpty {
-                        self.sendBinaryRaw(AgarProtocol.facebookTokenPacket(token: self.serverToken))
-                    }
-                    self.receiveLoopRaw()
-                } else {
-                    self.sendHandshake()
-                    self.receiveLoop()
-                }
-            case .failed(let error):
-                self.fallbackTimer?.invalidate()
-                self.lastError = "\(mode): \(error.localizedDescription)"
-                self.tryNextMode(current: mode)
-            case .waiting(let error):
-                self.lastError = "\(mode) waiting: \(error.localizedDescription)"
-            default:
-                break
+            self.writeSource?.cancel()
+            self.writeSource = nil
+            self.connectTimer?.invalidate()
+            self.connectTimer = nil
+
+            var err: Int32 = 0
+            var len = socklen_t(MemoryLayout<Int32>.size)
+            getsockopt(self.sockfd, SOL_SOCKET, SO_ERROR, &err, &len)
+            if err != 0 {
+                self.lastError = "SO_ERROR=\(err)"
+                self.closeSock()
+                self.state = .disconnected
+                return
             }
+            self.onTCPConnected()
+        }
+        ws.resume()
+
+        connectTimer = Timer.scheduledTimer(withTimeInterval: 8.0, repeats: false) { [weak self] _ in
+            guard let self = self, self.state == .connecting else { return }
+            self.lastError = "connect timeout"
+            self.disconnect()
+        }
+    }
+
+    private func onTCPConnected() {
+        connectTimer?.invalidate()
+        connectTimer = nil
+        connMode = "bsd-tcp"
+
+        let rs = DispatchSource.makeReadSource(fileDescriptor: sockfd, queue: .main)
+        self.readSource = rs
+        rs.setEventHandler { [weak self] in self?.onReadable() }
+        rs.resume()
+
+        sendWSUpgrade()
+
+        upgradeTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { [weak self] _ in
+            guard let self = self, !self.wsReady, self.state == .connecting else { return }
+            self.connMode = "bsd-raw"
+            self.wsReady = true
+            self.recvBuffer.removeAll()
+            self.state = .connected
+            self.sendGameHandshake()
+        }
+    }
+
+    // MARK: - WebSocket Upgrade
+
+    private func sendWSUpgrade() {
+        var keyBytes = [UInt8](repeating: 0, count: 16)
+        for i in 0..<16 { keyBytes[i] = UInt8.random(in: 0...255) }
+        let wsKey = Data(keyBytes).base64EncodedString()
+
+        let req = "GET / HTTP/1.1\r\n" +
+            "Host: \(serverHostname):\(serverPort)\r\n" +
+            "Upgrade: websocket\r\n" +
+            "Connection: Upgrade\r\n" +
+            "Sec-WebSocket-Key: \(wsKey)\r\n" +
+            "Sec-WebSocket-Version: 13\r\n" +
+            "Origin: https://agar.io\r\n" +
+            "User-Agent: Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)\r\n" +
+            "\r\n"
+        sockSend(Data(req.utf8))
+    }
+
+    private func processUpgradeResponse() {
+        guard let end = recvBuffer.range(of: Data("\r\n\r\n".utf8)) else { return }
+        upgradeTimer?.invalidate()
+        upgradeTimer = nil
+
+        let hdr = String(data: recvBuffer.subdata(in: 0..<end.lowerBound), encoding: .utf8) ?? ""
+        recvBuffer.removeSubrange(0..<end.upperBound)
+
+        if hdr.contains("101") {
+            wsReady = true
+            connMode = "bsd-ws"
+            state = .connected
+            sendGameHandshake()
+            if !recvBuffer.isEmpty { processWSFrames() }
+        } else {
+            wsReady = true
+            connMode = "bsd-raw"
+            recvBuffer.removeAll()
+            state = .connected
+            sendGameHandshake()
+        }
+    }
+
+    // MARK: - Data Reception
+
+    private func onReadable() {
+        var buf = [UInt8](repeating: 0, count: 65536)
+        let n = recv(sockfd, &buf, buf.count, 0)
+
+        if n == 0 {
+            lastError = "Server closed"
+            disconnect()
+            return
+        }
+        if n < 0 {
+            if errno == EAGAIN || errno == EWOULDBLOCK { return }
+            lastError = "recv errno=\(errno)"
+            disconnect()
+            return
         }
 
-        conn.start(queue: .main)
+        recvBuffer.append(contentsOf: buf[0..<n])
 
-        let nextMode: String? = mode == "wss" ? "ws" : (mode == "ws" ? "tcp" : nil)
-        if let next = nextMode {
-            fallbackTimer = Timer.scheduledTimer(withTimeInterval: 4.0, repeats: false) { [weak self] _ in
-                guard let self = self, self.state == .connecting else { return }
-                self.lastError = "\(mode) timeout, trying \(next)..."
-                self.tryNextMode(current: mode)
+        if !wsReady {
+            processUpgradeResponse()
+        } else if connMode == "bsd-ws" {
+            processWSFrames()
+        } else {
+            handlePacket(recvBuffer)
+            recvBuffer.removeAll()
+        }
+    }
+
+    // MARK: - WebSocket Frame I/O
+
+    private func processWSFrames() {
+        while recvBuffer.count >= 2 {
+            let b0 = recvBuffer[0]
+            let b1 = recvBuffer[1]
+            let opcode = b0 & 0x0F
+            let masked = (b1 & 0x80) != 0
+            var payloadLen = Int(b1 & 0x7F)
+            var headerLen = 2
+
+            if payloadLen == 126 {
+                guard recvBuffer.count >= 4 else { return }
+                payloadLen = Int(recvBuffer[2]) << 8 | Int(recvBuffer[3])
+                headerLen = 4
+            } else if payloadLen == 127 {
+                guard recvBuffer.count >= 10 else { return }
+                payloadLen = 0
+                for i in 0..<8 { payloadLen = (payloadLen << 8) | Int(recvBuffer[2 + i]) }
+                headerLen = 10
+            }
+
+            let maskLen = masked ? 4 : 0
+            let totalLen = headerLen + maskLen + payloadLen
+            guard recvBuffer.count >= totalLen else { return }
+
+            var payload = Data(recvBuffer[(headerLen + maskLen)..<totalLen])
+            if masked {
+                let mk = Array(recvBuffer[headerLen..<(headerLen + 4)])
+                for i in 0..<payload.count { payload[i] ^= mk[i % 4] }
+            }
+
+            recvBuffer.removeSubrange(0..<totalLen)
+
+            switch opcode {
+            case 0x02: handlePacket(payload)
+            case 0x01: handlePacket(payload)
+            case 0x08: disconnect(); return
+            case 0x09: sendWSPong(payload)
+            default: break
             }
         }
     }
 
-    private func tryNextMode(current: String) {
-        connection?.cancel()
-        connection = nil
-        fallbackTimer?.invalidate()
-        fallbackTimer = nil
+    private func wsSend(_ payload: Data) {
+        var frame = Data()
+        frame.append(0x82)
 
-        switch current {
-        case "wss": tryConnect(mode: "ws")
-        case "ws": tryConnect(mode: "tcp")
-        default: disconnect()
+        let len = payload.count
+        if len < 126 {
+            frame.append(UInt8(len) | 0x80)
+        } else if len < 65536 {
+            frame.append(126 | 0x80)
+            frame.append(UInt8((len >> 8) & 0xFF))
+            frame.append(UInt8(len & 0xFF))
+        } else {
+            frame.append(127 | 0x80)
+            for i in (0..<8).reversed() { frame.append(UInt8((len >> (i * 8)) & 0xFF)) }
+        }
+
+        var mask = [UInt8](repeating: 0, count: 4)
+        for i in 0..<4 { mask[i] = UInt8.random(in: 0...255) }
+        frame.append(contentsOf: mask)
+
+        for i in 0..<len { frame.append(payload[i] ^ mask[i % 4]) }
+
+        sockSend(frame)
+    }
+
+    private func sendWSPong(_ data: Data) {
+        var frame = Data()
+        frame.append(0x8A)
+        let len = min(data.count, 125)
+        frame.append(UInt8(len) | 0x80)
+        var mask = [UInt8](repeating: 0, count: 4)
+        for i in 0..<4 { mask[i] = UInt8.random(in: 0...255) }
+        frame.append(contentsOf: mask)
+        for i in 0..<len { frame.append(data[i] ^ mask[i % 4]) }
+        sockSend(frame)
+    }
+
+    // MARK: - Socket I/O
+
+    private func sockSend(_ data: Data) {
+        guard sockfd >= 0 else { return }
+        data.withUnsafeBytes { ptr in
+            guard let base = ptr.baseAddress else { return }
+            var sent = 0
+            while sent < data.count {
+                let n = Darwin.send(sockfd, base + sent, data.count - sent, 0)
+                if n <= 0 { return }
+                sent += n
+            }
         }
     }
 
-    func disconnect() {
+    private func closeSock() {
+        if sockfd >= 0 {
+            Darwin.close(sockfd)
+            sockfd = -1
+        }
+    }
+
+    private func cleanup() {
         moveTimer?.invalidate()
         moveTimer = nil
-        fallbackTimer?.invalidate()
-        fallbackTimer = nil
-        connection?.cancel()
-        connection = nil
+        connectTimer?.invalidate()
+        connectTimer = nil
+        upgradeTimer?.invalidate()
+        upgradeTimer = nil
+        readSource?.cancel()
+        readSource = nil
+        writeSource?.cancel()
+        writeSource = nil
+        closeSock()
+    }
+
+    // MARK: - Game Protocol
+
+    private func sendGameHandshake() {
+        gameSend(AgarProtocol.handshakePacket())
+        gameSend(AgarProtocol.connectionKeyPacket())
+        if !serverToken.isEmpty {
+            gameSend(AgarProtocol.facebookTokenPacket(token: serverToken))
+        }
+    }
+
+    private func gameSend(_ data: Data) {
+        if connMode == "bsd-ws" {
+            wsSend(data)
+        } else {
+            sockSend(data)
+        }
+    }
+
+    // MARK: - Public API
+
+    func disconnect() {
+        cleanup()
+        recvBuffer.removeAll()
+        wsReady = false
         if state != .disconnected {
             state = .disconnected
             delegate?.botDidDisconnect(self)
@@ -174,68 +381,16 @@ class AgarBot: Identifiable {
         targetPosition = (x, y)
     }
 
-    private func sendHandshake() {
-        sendBinary(AgarProtocol.handshakePacket())
-        sendBinary(AgarProtocol.connectionKeyPacket())
-        if !serverToken.isEmpty {
-            sendBinary(AgarProtocol.facebookTokenPacket(token: serverToken))
-        }
-    }
-
     func spawn() {
         state = .spawning
-        sendBinary(AgarProtocol.spawnPacket(name: name))
+        gameSend(AgarProtocol.spawnPacket(name: name))
     }
 
-    private func sendMove(x: Double, y: Double) {
-        sendBinary(AgarProtocol.movePacket(x: x, y: y))
+    func findCellByName(_ name: String) -> CellUpdate? {
+        cells.values.first { !ownIDs.contains($0.id) && !$0.isVirus && $0.name == name }
     }
 
-    private func sendBinary(_ data: Data) {
-        if connMode == "tcp" {
-            sendBinaryRaw(data)
-        } else {
-            let metadata = NWProtocolWebSocket.Metadata(opcode: .binary)
-            let context = NWConnection.ContentContext(identifier: "ws", metadata: [metadata])
-            connection?.send(content: data, contentContext: context, isComplete: true, completion: .contentProcessed({ _ in }))
-        }
-    }
-
-    private func sendBinaryRaw(_ data: Data) {
-        connection?.send(content: data, completion: .contentProcessed({ _ in }))
-    }
-
-    private func receiveLoop() {
-        connection?.receiveMessage { [weak self] data, context, _, error in
-            guard let self = self else { return }
-            if let error = error {
-                self.lastError = error.localizedDescription
-                self.disconnect()
-                return
-            }
-            if let data = data, !data.isEmpty,
-               let metadata = context?.protocolMetadata(definition: NWProtocolWebSocket.definition) as? NWProtocolWebSocket.Metadata,
-               metadata.opcode == .binary {
-                self.handlePacket(data)
-            }
-            self.receiveLoop()
-        }
-    }
-
-    private func receiveLoopRaw() {
-        connection?.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, _, error in
-            guard let self = self else { return }
-            if let error = error {
-                self.lastError = error.localizedDescription
-                self.disconnect()
-                return
-            }
-            if let data = data, !data.isEmpty {
-                self.handlePacket(data)
-            }
-            self.receiveLoopRaw()
-        }
-    }
+    // MARK: - Packet Handling
 
     private func handlePacket(_ data: Data) {
         guard let packet = AgarProtocol.parsePacket(data) else { return }
@@ -292,6 +447,8 @@ class AgarBot: Identifiable {
         }
     }
 
+    // MARK: - Movement
+
     private func updateUIDTarget() {
         guard !targetUID.isEmpty else { return }
         if let uid = UInt32(targetUID, radix: 16), let cell = cells[uid] {
@@ -303,10 +460,6 @@ class AgarBot: Identifiable {
         }) {
             targetPosition = (Double(cell.x), Double(cell.y))
         }
-    }
-
-    func findCellByName(_ name: String) -> CellUpdate? {
-        cells.values.first { !ownIDs.contains($0.id) && !$0.isVirus && $0.name == name }
     }
 
     private func startMovementLoop() {
@@ -322,24 +475,24 @@ class AgarBot: Identifiable {
         switch action {
         case .feedTarget:
             moveToTarget()
-            sendBinary(AgarProtocol.ejectMassPacket())
+            gameSend(AgarProtocol.ejectMassPacket())
         case .suicide:
             moveToTarget()
-            sendBinary(AgarProtocol.splitPacket())
+            gameSend(AgarProtocol.splitPacket())
         case .feedEverywhere:
             let rx = Double.random(in: worldBorder.minX...worldBorder.maxX)
             let ry = Double.random(in: worldBorder.minY...worldBorder.maxY)
-            sendMove(x: rx, y: ry)
-            sendBinary(AgarProtocol.ejectMassPacket())
+            gameSend(AgarProtocol.movePacket(x: rx, y: ry))
+            gameSend(AgarProtocol.ejectMassPacket())
         }
     }
 
     private func moveToTarget() {
         guard let t = targetPosition else {
-            sendMove(x: worldBorder.centerX, y: worldBorder.centerY)
+            gameSend(AgarProtocol.movePacket(x: worldBorder.centerX, y: worldBorder.centerY))
             return
         }
-        sendMove(x: t.x, y: t.y)
+        gameSend(AgarProtocol.movePacket(x: t.x, y: t.y))
     }
 
     private var ownPosition: (x: Double, y: Double)? {
