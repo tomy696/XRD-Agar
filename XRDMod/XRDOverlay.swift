@@ -391,7 +391,7 @@ class XRDOverlay: NSObject {
 
     func debugDump() -> String {
         var L: [String] = []
-        L.append("=== XRD DUMP v18 ===")
+        L.append("=== XRD DUMP v19 ===")
 
         L.append("")
         L.append("-- APP --")
@@ -460,6 +460,8 @@ class XRDOverlay: NSObject {
             L.append("  Bot[\(i)]: \(bot.state) mode=\(bot.connMode) ip=\(bot.serverIP):\(bot.serverPort) err=\(bot.lastError)")
         }
         L.append("Macro: on=\(settings.isMacroEnabled) power=\(settings.macroPower)")
+        L.append("Bots.log(\(AgarBot.recentLog.count)):")
+        for entry in AgarBot.recentLog.suffix(20) { L.append("  \(entry)") }
 
         L.append("")
         L.append("-- WINDOWS --")

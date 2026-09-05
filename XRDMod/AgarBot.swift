@@ -31,13 +31,20 @@ class AgarBot: Identifiable {
     private(set) var connMode: String = ""
     private(set) var lastError: String = ""
 
+    // diagnostic log visible in dump even after disconnect
+    static var recentLog: [String] = []
+    private static func log(_ msg: String) {
+        DispatchQueue.main.async {
+            if recentLog.count >= 30 { recentLog.removeFirst() }
+            recentLog.append(msg)
+        }
+    }
+
     private var sockfd: Int32 = -1
     private var readSource: DispatchSourceRead?
-    private var writeSource: DispatchSourceWrite?
-    private var connectTimer: Timer?
-    private var upgradeTimer: Timer?
     private var recvBuffer = Data()
     private var wsReady = false
+    private var upgradeTimer: Timer?
 
     private var targetPosition: (x: Double, y: Double)?
     private var ownIDs: [UInt32] = []
@@ -46,6 +53,7 @@ class AgarBot: Identifiable {
     private var moveTimer: Timer?
     private var isAlive: Bool = false
     private var respawnCount: Int = 0
+    private var cancelled = false
 
     init(name: String, serverIP: String, serverPort: Int, serverHostname: String, serverToken: String, action: BotAction) {
         self.name = name
@@ -60,7 +68,7 @@ class AgarBot: Identifiable {
         cleanup()
     }
 
-    // MARK: - BSD Socket Connection
+    // MARK: - Connection (blocking connect on background queue)
 
     func connect() {
         state = .connecting
@@ -68,78 +76,106 @@ class AgarBot: Identifiable {
         connMode = "bsd"
         recvBuffer.removeAll()
         wsReady = false
+        cancelled = false
 
-        sockfd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
-        guard sockfd >= 0 else {
-            lastError = "socket() errno=\(errno)"
-            state = .disconnected
-            return
-        }
+        AgarBot.log("[\(name)] connecting to \(serverIP):\(serverPort)")
 
-        let flags = fcntl(sockfd, F_GETFL, 0)
-        if flags >= 0 { _ = fcntl(sockfd, F_SETFL, flags | O_NONBLOCK) }
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self, !self.cancelled else { return }
 
-        var addr = sockaddr_in()
-        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-        addr.sin_family = sa_family_t(AF_INET)
-        addr.sin_port = UInt16(serverPort).bigEndian
-        guard inet_pton(AF_INET, serverIP, &addr.sin_addr) == 1 else {
-            lastError = "Bad IP: \(serverIP)"
-            closeSock()
-            state = .disconnected
-            return
-        }
-
-        let ret = withUnsafePointer(to: &addr) { p in
-            p.withMemoryRebound(to: sockaddr.self, capacity: 1) { sp in
-                Darwin.connect(sockfd, sp, socklen_t(MemoryLayout<sockaddr_in>.size))
-            }
-        }
-
-        if ret == 0 {
-            onTCPConnected()
-            return
-        }
-        if errno != EINPROGRESS {
-            lastError = "connect errno=\(errno)"
-            closeSock()
-            state = .disconnected
-            return
-        }
-
-        let ws = DispatchSource.makeWriteSource(fileDescriptor: sockfd, queue: .main)
-        self.writeSource = ws
-        ws.setEventHandler { [weak self] in
-            guard let self = self else { return }
-            self.writeSource?.cancel()
-            self.writeSource = nil
-            self.connectTimer?.invalidate()
-            self.connectTimer = nil
-
-            var err: Int32 = 0
-            var len = socklen_t(MemoryLayout<Int32>.size)
-            getsockopt(self.sockfd, SOL_SOCKET, SO_ERROR, &err, &len)
-            if err != 0 {
-                self.lastError = "SO_ERROR=\(err)"
-                self.closeSock()
-                self.state = .disconnected
+            let fd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
+            guard fd >= 0 else {
+                let e = errno
+                AgarBot.log("[\(self.name)] socket() failed errno=\(e)")
+                DispatchQueue.main.async {
+                    self.lastError = "socket errno=\(e)"
+                    self.state = .disconnected
+                }
                 return
             }
-            self.onTCPConnected()
-        }
-        ws.resume()
 
-        connectTimer = Timer.scheduledTimer(withTimeInterval: 8.0, repeats: false) { [weak self] _ in
-            guard let self = self, self.state == .connecting else { return }
-            self.lastError = "connect timeout"
-            self.disconnect()
+            // prevent SIGPIPE crash
+            var on: Int32 = 1
+            setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
+
+            // 10s connect timeout via SO_SNDTIMEO
+            var tv = timeval(tv_sec: 10, tv_usec: 0)
+            setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+
+            var addr = sockaddr_in()
+            addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+            addr.sin_family = sa_family_t(AF_INET)
+            addr.sin_port = UInt16(self.serverPort).bigEndian
+
+            guard inet_pton(AF_INET, self.serverIP, &addr.sin_addr) == 1 else {
+                AgarBot.log("[\(self.name)] bad IP \(self.serverIP)")
+                Darwin.close(fd)
+                DispatchQueue.main.async {
+                    self.lastError = "bad IP"
+                    self.state = .disconnected
+                }
+                return
+            }
+
+            AgarBot.log("[\(self.name)] calling connect() fd=\(fd)")
+
+            let ret = withUnsafePointer(to: &addr) { p in
+                p.withMemoryRebound(to: sockaddr.self, capacity: 1) { sp in
+                    Darwin.connect(fd, sp, socklen_t(MemoryLayout<sockaddr_in>.size))
+                }
+            }
+            let connectErrno = errno
+
+            guard !self.cancelled else {
+                Darwin.close(fd)
+                return
+            }
+
+            if ret != 0 {
+                AgarBot.log("[\(self.name)] connect() failed errno=\(connectErrno) (\(self.errnoName(connectErrno)))")
+                Darwin.close(fd)
+                DispatchQueue.main.async {
+                    self.lastError = "connect errno=\(connectErrno) \(self.errnoName(connectErrno))"
+                    self.state = .disconnected
+                }
+                return
+            }
+
+            AgarBot.log("[\(self.name)] TCP connected! fd=\(fd)")
+
+            DispatchQueue.main.async {
+                guard !self.cancelled else {
+                    Darwin.close(fd)
+                    return
+                }
+                self.sockfd = fd
+                self.onTCPConnected()
+            }
+        }
+    }
+
+    private func errnoName(_ e: Int32) -> String {
+        switch e {
+        case 60: return "ETIMEDOUT"
+        case 61: return "ECONNREFUSED"
+        case 54: return "ECONNRESET"
+        case 51: return "ENETUNREACH"
+        case 50: return "ENETDOWN"
+        case 65: return "EHOSTUNREACH"
+        case 36: return "EINPROGRESS"
+        case 48: return "EADDRINUSE"
+        case 22: return "EINVAL"
+        case 0: return "OK"
+        default: return "E?\(e)"
         }
     }
 
     private func onTCPConnected() {
-        connectTimer?.invalidate()
-        connectTimer = nil
         connMode = "bsd-tcp"
+
+        // switch to non-blocking for async reads
+        let flags = fcntl(sockfd, F_GETFL, 0)
+        if flags >= 0 { _ = fcntl(sockfd, F_SETFL, flags | O_NONBLOCK) }
 
         let rs = DispatchSource.makeReadSource(fileDescriptor: sockfd, queue: .main)
         self.readSource = rs
@@ -149,7 +185,8 @@ class AgarBot: Identifiable {
         sendWSUpgrade()
 
         upgradeTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { [weak self] _ in
-            guard let self = self, !self.wsReady, self.state == .connecting else { return }
+            guard let self = self, !self.wsReady else { return }
+            AgarBot.log("[\(self.name)] WS upgrade timeout, trying raw binary")
             self.connMode = "bsd-raw"
             self.wsReady = true
             self.recvBuffer.removeAll()
@@ -174,6 +211,7 @@ class AgarBot: Identifiable {
             "Origin: https://agar.io\r\n" +
             "User-Agent: Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)\r\n" +
             "\r\n"
+        AgarBot.log("[\(name)] sending WS upgrade")
         sockSend(Data(req.utf8))
     }
 
@@ -183,12 +221,16 @@ class AgarBot: Identifiable {
         upgradeTimer = nil
 
         let hdr = String(data: recvBuffer.subdata(in: 0..<end.lowerBound), encoding: .utf8) ?? ""
+        let firstLine = hdr.components(separatedBy: "\r\n").first ?? ""
         recvBuffer.removeSubrange(0..<end.upperBound)
+
+        AgarBot.log("[\(name)] upgrade response: \(firstLine)")
 
         if hdr.contains("101") {
             wsReady = true
             connMode = "bsd-ws"
             state = .connected
+            AgarBot.log("[\(name)] WS connected, sending handshake")
             sendGameHandshake()
             if !recvBuffer.isEmpty { processWSFrames() }
         } else {
@@ -196,6 +238,7 @@ class AgarBot: Identifiable {
             connMode = "bsd-raw"
             recvBuffer.removeAll()
             state = .connected
+            AgarBot.log("[\(name)] WS rejected, trying raw binary")
             sendGameHandshake()
         }
     }
@@ -207,12 +250,14 @@ class AgarBot: Identifiable {
         let n = recv(sockfd, &buf, buf.count, 0)
 
         if n == 0 {
+            AgarBot.log("[\(name)] server closed connection")
             lastError = "Server closed"
             disconnect()
             return
         }
         if n < 0 {
             if errno == EAGAIN || errno == EWOULDBLOCK { return }
+            AgarBot.log("[\(name)] recv errno=\(errno)")
             lastError = "recv errno=\(errno)"
             disconnect()
             return
@@ -265,8 +310,7 @@ class AgarBot: Identifiable {
             recvBuffer.removeSubrange(0..<totalLen)
 
             switch opcode {
-            case 0x02: handlePacket(payload)
-            case 0x01: handlePacket(payload)
+            case 0x01, 0x02: handlePacket(payload)
             case 0x08: disconnect(); return
             case 0x09: sendWSPong(payload)
             default: break
@@ -293,9 +337,7 @@ class AgarBot: Identifiable {
         var mask = [UInt8](repeating: 0, count: 4)
         for i in 0..<4 { mask[i] = UInt8.random(in: 0...255) }
         frame.append(contentsOf: mask)
-
         for i in 0..<len { frame.append(payload[i] ^ mask[i % 4]) }
-
         sockSend(frame)
     }
 
@@ -336,14 +378,10 @@ class AgarBot: Identifiable {
     private func cleanup() {
         moveTimer?.invalidate()
         moveTimer = nil
-        connectTimer?.invalidate()
-        connectTimer = nil
         upgradeTimer?.invalidate()
         upgradeTimer = nil
         readSource?.cancel()
         readSource = nil
-        writeSource?.cancel()
-        writeSource = nil
         closeSock()
     }
 
@@ -368,10 +406,12 @@ class AgarBot: Identifiable {
     // MARK: - Public API
 
     func disconnect() {
+        cancelled = true
         cleanup()
         recvBuffer.removeAll()
         wsReady = false
         if state != .disconnected {
+            AgarBot.log("[\(name)] disconnected: \(lastError)")
             state = .disconnected
             delegate?.botDidDisconnect(self)
         }
@@ -419,12 +459,14 @@ class AgarBot: Identifiable {
             if !ids.isEmpty {
                 isAlive = true
                 state = .alive
+                AgarBot.log("[\(name)] ALIVE ids=\(ids)")
                 delegate?.bot(self, didSpawnWithIDs: ids)
                 startMovementLoop()
             }
 
         case .worldBorder(let border):
             worldBorder = border
+            AgarBot.log("[\(name)] got world border, spawning")
             if state == .connecting || state == .connected {
                 state = .connected
                 spawn()
