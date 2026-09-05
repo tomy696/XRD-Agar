@@ -10,77 +10,6 @@ class ServerResolver {
         let hostname: String
     }
 
-    private static let gameRegions = [
-        "us-east-1", "us-east-2", "us-west-1",
-        "ap-northeast-1", "ap-southeast-1",
-        "eu-central-1", "eu-west-2", "eu-west-3",
-        "sa-east-1", "me-south-1"
-    ]
-
-    private static let domainTemplate = "%@.mobile-live-v26.agario.miniclippt.com"
-
-    static func resolveHostname(forIP ip: String, port: Int, completion: @escaping (String, String) -> Void) {
-        let cleanIP = ip.hasPrefix("::ffff:") ? String(ip.dropFirst(7)) : ip
-        let ipParts = cleanIP.split(separator: ".")
-        let group = DispatchGroup()
-        var matchedHostname: String?
-        var subnetHostname: String?
-        let lock = NSLock()
-
-        for region in gameRegions {
-            group.enter()
-            let hostname = String(format: domainTemplate, region)
-            let host = hostname as CFString
-            let hostRef = CFHostCreateWithName(kCFAllocatorDefault, host).takeRetainedValue()
-            var resolved = DarwinBoolean(false)
-            CFHostStartInfoResolution(hostRef, .addresses, nil)
-            if let addrs = CFHostGetAddressing(hostRef, &resolved)?.takeUnretainedValue() as? [Data] {
-                for addrData in addrs {
-                    var storage = sockaddr_storage()
-                    addrData.withUnsafeBytes { ptr in
-                        _ = memcpy(&storage, ptr.baseAddress!, min(addrData.count, MemoryLayout<sockaddr_storage>.size))
-                    }
-                    var buf = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
-                    if storage.ss_family == sa_family_t(AF_INET) {
-                        var sin = withUnsafePointer(to: &storage) { $0.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee } }
-                        inet_ntop(AF_INET, &sin.sin_addr, &buf, socklen_t(INET6_ADDRSTRLEN))
-                    } else if storage.ss_family == sa_family_t(AF_INET6) {
-                        var sin6 = withUnsafePointer(to: &storage) { $0.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { $0.pointee } }
-                        inet_ntop(AF_INET6, &sin6.sin6_addr, &buf, socklen_t(INET6_ADDRSTRLEN))
-                    }
-                    let resolvedStr = String(cString: buf)
-                    let cleanResolved = resolvedStr.hasPrefix("::ffff:") ? String(resolvedStr.dropFirst(7)) : resolvedStr
-                    if cleanResolved == cleanIP {
-                        lock.lock()
-                        matchedHostname = hostname
-                        lock.unlock()
-                    } else if ipParts.count >= 2 {
-                        let resParts = cleanResolved.split(separator: ".")
-                        if resParts.count >= 2 && resParts[0] == ipParts[0] && resParts[1] == ipParts[1] {
-                            lock.lock()
-                            if subnetHostname == nil { subnetHostname = hostname }
-                            lock.unlock()
-                        }
-                    }
-                }
-            }
-            group.leave()
-        }
-
-        group.notify(queue: .main) {
-            let resolvedHostname: String
-            if let hostname = matchedHostname {
-                resolvedHostname = hostname
-            } else if let hostname = subnetHostname {
-                resolvedHostname = hostname
-            } else {
-                resolvedHostname = String(format: domainTemplate, gameRegions[0])
-            }
-
-            completion(resolvedHostname, "wss://\(resolvedHostname):\(port)")
-        }
-    }
-
     static func resolveServer(
         partyCode: String = "",
         completion: @escaping (Result<ServerInfo, Error>) -> Void
@@ -94,15 +23,7 @@ class ServerResolver {
             let port = parsed.port ?? 443
             let ip = interceptor.capturedServerIP ?? host
 
-            let isIPAddress = host.allSatisfy { $0.isNumber || $0 == "." || $0 == ":" }
-            if !isIPAddress {
-                completion(.success(ServerInfo(url: wsURL, token: token, ip: ip, port: port, hostname: host)))
-                return
-            }
-
-            resolveHostname(forIP: host, port: port) { hostname, resolvedURL in
-                completion(.success(ServerInfo(url: resolvedURL, token: token, ip: host, port: port, hostname: hostname)))
-            }
+            completion(.success(ServerInfo(url: wsURL, token: token, ip: ip, port: port, hostname: host)))
             return
         }
 
@@ -110,14 +31,7 @@ class ServerResolver {
            !bsdServer.isEmpty,
            let parsed = URLComponents(string: bsdServer), let host = parsed.host {
             let p = parsed.port ?? 443
-            let isIP = host.allSatisfy { $0.isNumber || $0 == "." || $0 == ":" }
-            if !isIP {
-                completion(.success(ServerInfo(url: bsdServer, token: partyCode, ip: host, port: p, hostname: host)))
-            } else {
-                resolveHostname(forIP: host, port: p) { hostname, resolvedURL in
-                    completion(.success(ServerInfo(url: resolvedURL, token: partyCode, ip: host, port: p, hostname: hostname)))
-                }
-            }
+            completion(.success(ServerInfo(url: bsdServer, token: partyCode, ip: host, port: p, hostname: host)))
             return
         }
 
