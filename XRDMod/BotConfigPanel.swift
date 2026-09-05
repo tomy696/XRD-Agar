@@ -3,9 +3,10 @@ import SwiftUI
 struct BotConfigPanel: View {
     @ObservedObject var settings: GameSettings
     @ObservedObject var botEngine: BotEngine
-    @State private var nameInput: String = "XRD Bot"
+    @State private var nameInput: String = ""
     @State private var groupCode: String = ""
     @State private var copiedUID: String = ""
+    @State private var didInit = false
 
     private var xrdPurple: Color { Color(red: 0.459, green: 0.318, blue: 0.957) }
     private var xrdCyan: Color { Color(red: 0.2, green: 0.8, blue: 0.9) }
@@ -21,6 +22,12 @@ struct BotConfigPanel: View {
             targetSection
             botSettings
             Spacer(minLength: 8)
+        }
+        .onAppear {
+            guard !didInit else { return }
+            didInit = true
+            nameInput = settings.botConfig.botNames.joined(separator: ", ")
+            groupCode = settings.botConfig.partyCode
         }
     }
 

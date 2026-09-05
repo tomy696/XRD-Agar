@@ -87,22 +87,21 @@ class ServerResolver {
     ) {
         let interceptor = NetworkInterceptor.shared
 
-        if let wsURL = interceptor.bestServerURL {
+        if let wsURL = interceptor.bestServerURL,
+           let parsed = URLComponents(string: wsURL),
+           let host = parsed.host {
             let token = interceptor.capturedToken ?? partyCode
+            let port = parsed.port ?? 443
+            let ip = interceptor.capturedServerIP ?? host
 
-            if let ip = interceptor.capturedServerIP, let port = interceptor.capturedServerPort {
-                resolveHostname(forIP: ip, port: port) { hostname, resolvedURL in
-                    completion(.success(ServerInfo(url: resolvedURL, token: token, ip: ip, port: port, hostname: hostname)))
-                }
+            let isIPAddress = host.allSatisfy { $0.isNumber || $0 == "." || $0 == ":" }
+            if !isIPAddress {
+                completion(.success(ServerInfo(url: wsURL, token: token, ip: ip, port: port, hostname: host)))
                 return
             }
 
-            let fallbackHost = String(format: domainTemplate, gameRegions[0])
-            if let parsed = URLComponents(string: wsURL), let host = parsed.host {
-                let p = parsed.port ?? 443
-                completion(.success(ServerInfo(url: wsURL, token: token, ip: host, port: p, hostname: host)))
-            } else {
-                completion(.success(ServerInfo(url: wsURL, token: token, ip: fallbackHost, port: 443, hostname: fallbackHost)))
+            resolveHostname(forIP: host, port: port) { hostname, resolvedURL in
+                completion(.success(ServerInfo(url: resolvedURL, token: token, ip: host, port: port, hostname: hostname)))
             }
             return
         }
@@ -111,8 +110,14 @@ class ServerResolver {
            !bsdServer.isEmpty,
            let parsed = URLComponents(string: bsdServer), let host = parsed.host {
             let p = parsed.port ?? 443
-            let h = String(format: domainTemplate, gameRegions[0])
-            completion(.success(ServerInfo(url: bsdServer, token: partyCode, ip: host, port: p, hostname: h)))
+            let isIP = host.allSatisfy { $0.isNumber || $0 == "." || $0 == ":" }
+            if !isIP {
+                completion(.success(ServerInfo(url: bsdServer, token: partyCode, ip: host, port: p, hostname: host)))
+            } else {
+                resolveHostname(forIP: host, port: p) { hostname, resolvedURL in
+                    completion(.success(ServerInfo(url: resolvedURL, token: partyCode, ip: host, port: p, hostname: hostname)))
+                }
+            }
             return
         }
 

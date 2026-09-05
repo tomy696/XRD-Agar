@@ -4,14 +4,13 @@ struct ModMenuView: View {
     @ObservedObject var settings: GameSettings
     @ObservedObject var botEngine: BotEngine
     @ObservedObject var zoomEngine: ZoomEngine
-    @State private var activeTab: MenuTab = .macro
+    @State private var activeTab: MenuTab = .bots
     @State private var showSaved = false
     @State private var manualServer: String = ""
     @State private var configCopiedUID = false
     @State private var debugCopied = false
 
     enum MenuTab: String, CaseIterable {
-        case macro = "Macro"
         case bots = "Bots"
         case zoom = "Zoom"
         case config = "Config"
@@ -91,7 +90,6 @@ struct ModMenuView: View {
     private var tabContent: some View {
         ScrollView(.vertical, showsIndicators: false) {
             switch activeTab {
-            case .macro: macroTab
             case .bots: BotConfigPanel(settings: settings, botEngine: botEngine)
             case .zoom: zoomTab
             case .config: configTab
@@ -99,92 +97,6 @@ struct ModMenuView: View {
         }
         .padding(.horizontal, 8)
         .padding(.top, 4)
-    }
-
-    // MARK: - Macro Tab
-
-    private var macroTab: some View {
-        VStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 5) {
-                HStack {
-                    sectionHeader("MACRO")
-                    Spacer()
-                    Toggle("", isOn: $settings.isMacroEnabled)
-                        .tint(xrdPurple)
-                        .labelsHidden()
-                        .scaleEffect(0.7)
-                }
-
-                if settings.isMacroEnabled {
-                    HStack(spacing: 4) {
-                        Circle()
-                            .fill(NetworkInterceptor.shared.hasGameWS ? Color.green : Color.orange)
-                            .frame(width: 6, height: 6)
-                        Text(NetworkInterceptor.shared.hasGameWS ? "FEEDING" : "NO WS - feed inactive")
-                            .font(.system(size: 7, weight: .black, design: .monospaced))
-                            .foregroundColor(NetworkInterceptor.shared.hasGameWS ? .green : .orange)
-                    }
-
-                    VStack(spacing: 3) {
-                        HStack {
-                            Text("Power")
-                                .font(.system(size: 8, weight: .bold, design: .monospaced))
-                                .foregroundColor(.gray)
-                            Spacer()
-                            Text("\(Int(settings.macroPower))")
-                                .font(.system(size: 11, weight: .black, design: .monospaced))
-                                .foregroundColor(xrdCyan)
-                        }
-                        Slider(value: $settings.macroPower, in: 1...10, step: 1)
-                            .accentColor(xrdPurple)
-                        HStack {
-                            Text("Slow")
-                                .font(.system(size: 7, design: .monospaced))
-                                .foregroundColor(.gray.opacity(0.5))
-                            Spacer()
-                            Text("\(Int(settings.feedInterval * 1000))ms")
-                                .font(.system(size: 7, weight: .bold, design: .monospaced))
-                                .foregroundColor(.gray)
-                            Spacer()
-                            Text("Fast")
-                                .font(.system(size: 7, design: .monospaced))
-                                .foregroundColor(.gray.opacity(0.5))
-                        }
-                    }
-
-                    HStack(spacing: 6) {
-                        Text("SIZE")
-                            .font(.system(size: 7, weight: .bold, design: .monospaced))
-                            .foregroundColor(.gray)
-                        Button(action: { settings.macroButtonSize = max(30, settings.macroButtonSize - 5) }) {
-                            Text("-").font(.system(size: 12, weight: .bold))
-                                .foregroundColor(.white)
-                                .frame(width: 22, height: 22)
-                                .background(Color.white.opacity(0.1))
-                                .cornerRadius(4)
-                        }
-                        Text("\(Int(settings.macroButtonSize))")
-                            .font(.system(size: 9, weight: .bold, design: .monospaced))
-                            .foregroundColor(.white)
-                            .frame(width: 26)
-                        Button(action: { settings.macroButtonSize = min(100, settings.macroButtonSize + 5) }) {
-                            Text("+").font(.system(size: 12, weight: .bold))
-                                .foregroundColor(.white)
-                                .frame(width: 22, height: 22)
-                                .background(Color.white.opacity(0.1))
-                                .cornerRadius(4)
-                        }
-                    }
-                } else {
-                    Text("Enable to auto-feed mass")
-                        .font(.system(size: 8, design: .monospaced))
-                        .foregroundColor(.gray.opacity(0.5))
-                }
-            }
-            .sectionStyle()
-
-            Spacer(minLength: 8)
-        }
     }
 
     // MARK: - Zoom Tab

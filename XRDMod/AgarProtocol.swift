@@ -4,17 +4,17 @@ class AgarProtocol {
 
     // MARK: - Client → Server Packets
 
-    static func handshakePacket(protocolVersion: UInt32 = 22) -> Data {
+    static func handshakePacket(protocolVersion: UInt32 = 23) -> Data {
         var data = Data()
         data.append(254)
         data.appendUInt32(protocolVersion)
         return data
     }
 
-    static func connectionKeyPacket(key: UInt32 = 0) -> Data {
+    static func connectionKeyPacket(key: UInt64 = 0x7999) -> Data {
         var data = Data()
         data.append(255)
-        data.appendUInt32(key)
+        data.appendUInt64(key)
         return data
     }
 
@@ -59,6 +59,17 @@ class AgarProtocol {
         return data
     }
 
+    // MARK: - XOR Obfuscation (v23 protocol)
+
+    static func xorApply(_ data: Data, key: [UInt8]) -> Data {
+        guard !key.isEmpty else { return data }
+        var result = Data(count: data.count)
+        for i in 0..<data.count {
+            result[i] = data[i] ^ key[i % key.count]
+        }
+        return result
+    }
+
     // MARK: - Server → Client Parsing
 
     static func parsePacket(_ data: Data) -> ServerPacket? {
@@ -67,6 +78,17 @@ class AgarProtocol {
         reader.skip(1)
 
         switch firstByte {
+        // v23 opcodes (after XOR decode)
+        case 0xF1:
+            return parseVersion(data)
+        case 0x6B:
+            return .ack
+        case 0x66:
+            return parseWorldUpdate(reader)
+        case 0xDC:
+            return parseLeaderboardFFA(reader)
+
+        // v22 opcodes (fallback)
         case 16:
             return parseWorldUpdate(reader)
         case 17:
@@ -84,8 +106,18 @@ class AgarProtocol {
         case 99:
             return parseChatMessage(reader)
         default:
-            return nil
+            return .unknown(opcode: firstByte, data: data)
         }
+    }
+
+    private static func parseVersion(_ data: Data) -> ServerPacket {
+        guard data.count >= 5 else { return .version(xorKey: [], versionString: "") }
+        let key = [data[1], data[2], data[3], data[4]]
+        var verStr = ""
+        if data.count > 5 {
+            verStr = String(data: data[5...], encoding: .utf8)?.replacingOccurrences(of: "\0", with: "") ?? ""
+        }
+        return .version(xorKey: key, versionString: verStr)
     }
 
     private static func parseWorldUpdate(_ reader: BinaryReader) -> ServerPacket {
@@ -204,6 +236,8 @@ class AgarProtocol {
 // MARK: - Packet Types
 
 enum ServerPacket {
+    case version(xorKey: [UInt8], versionString: String)
+    case ack
     case worldUpdate(eatRecords: [(eater: UInt32, eaten: UInt32)], updates: [CellUpdate], removals: [UInt32])
     case ownIDs([UInt32])
     case worldBorder(WorldBorder)
@@ -211,6 +245,7 @@ enum ServerPacket {
     case clearCell(UInt32)
     case leaderboard([(id: UInt32, name: String)])
     case chatMessage(name: String, message: String, color: UInt32)
+    case unknown(opcode: UInt8, data: Data)
 }
 
 // MARK: - Binary Reader
@@ -295,6 +330,11 @@ extension Data {
     mutating func appendInt16(_ value: Int16) {
         var val = value.littleEndian
         append(Data(bytes: &val, count: 2))
+    }
+
+    mutating func appendUInt64(_ value: UInt64) {
+        var val = value.littleEndian
+        append(Data(bytes: &val, count: 8))
     }
 
     mutating func appendFloat64(_ value: Double) {

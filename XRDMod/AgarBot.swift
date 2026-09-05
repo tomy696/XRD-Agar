@@ -1,5 +1,4 @@
 import Foundation
-import Darwin.POSIX
 
 protocol AgarBotDelegate: AnyObject {
     func bot(_ bot: AgarBot, didUpdateState state: AgarBot.State)
@@ -8,7 +7,7 @@ protocol AgarBotDelegate: AnyObject {
     func botDidDisconnect(_ bot: AgarBot)
 }
 
-class AgarBot: Identifiable {
+class AgarBot: NSObject, Identifiable {
     let id = UUID()
     let name: String
     let serverIP: String
@@ -31,7 +30,6 @@ class AgarBot: Identifiable {
     private(set) var connMode: String = ""
     private(set) var lastError: String = ""
 
-    // diagnostic log visible in dump even after disconnect
     static var recentLog: [String] = []
     private static func log(_ msg: String) {
         DispatchQueue.main.async {
@@ -40,11 +38,8 @@ class AgarBot: Identifiable {
         }
     }
 
-    private var sockfd: Int32 = -1
-    private var readSource: DispatchSourceRead?
-    private var recvBuffer = Data()
-    private var wsReady = false
-    private var upgradeTimer: Timer?
+    private var webSocketTask: URLSessionWebSocketTask?
+    private var urlSession: URLSession?
 
     private var targetPosition: (x: Double, y: Double)?
     private var ownIDs: [UInt32] = []
@@ -54,6 +49,8 @@ class AgarBot: Identifiable {
     private var isAlive: Bool = false
     private var respawnCount: Int = 0
     private var cancelled = false
+    private var xorKey: [UInt8]?
+    private(set) var serverPacketCount: Int = 0
 
     init(name: String, serverIP: String, serverPort: Int, serverHostname: String, serverToken: String, action: BotAction) {
         self.name = name
@@ -62,382 +59,98 @@ class AgarBot: Identifiable {
         self.serverHostname = serverHostname
         self.serverToken = serverToken
         self.action = action
+        super.init()
     }
 
     deinit {
         cleanup()
     }
 
-    // MARK: - Connection (getaddrinfo + non-blocking connect + poll)
+    // MARK: - Connection (URLSessionWebSocketTask — handles TLS + WS natively)
 
     func connect() {
         state = .connecting
         lastError = ""
-        connMode = "bsd"
-        recvBuffer.removeAll()
-        wsReady = false
+        connMode = "wss"
         cancelled = false
+        xorKey = nil
+        serverPacketCount = 0
 
-        AgarBot.log("[\(name)] v20 connecting to \(serverIP):\(serverPort)")
+        let urlString = "wss://\(serverHostname):\(serverPort)/"
+        guard let url = URL(string: urlString) else {
+            AgarBot.log("[\(name)] invalid URL: \(urlString)")
+            lastError = "invalid URL"
+            state = .disconnected
+            return
+        }
 
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        AgarBot.log("[\(name)] connecting \(urlString)")
+
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 15
+        urlSession = URLSession(configuration: config, delegate: self, delegateQueue: .main)
+        NetworkInterceptor.shared.botSessions.add(urlSession!)
+
+        webSocketTask = urlSession?.webSocketTask(with: url)
+        webSocketTask?.resume()
+        receiveLoop()
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
             guard let self = self, !self.cancelled else { return }
+            if self.state == .connected {
+                AgarBot.log("[\(self.name)] spawn timeout — forcing spawn")
+                self.spawn()
+            }
+        }
+    }
 
-            // getaddrinfo resolves IPv4 to NAT64 IPv6 on IPv6-only networks
-            var hints = addrinfo()
-            hints.ai_socktype = SOCK_STREAM
-            hints.ai_protocol = IPPROTO_TCP
-
-            var res: UnsafeMutablePointer<addrinfo>?
-            let portStr = "\(self.serverPort)"
-            let gaiRet = getaddrinfo(self.serverIP, portStr, &hints, &res)
-
-            guard gaiRet == 0, let ai = res else {
-                let errStr = gaiRet != 0 ? String(cString: gai_strerror(gaiRet)) : "nil"
-                AgarBot.log("[\(self.name)] getaddrinfo failed: \(errStr)")
-                if res != nil { freeaddrinfo(res) }
-                DispatchQueue.main.async {
-                    self.lastError = "resolve: \(errStr)"
-                    self.state = .disconnected
+    private func receiveLoop() {
+        webSocketTask?.receive { [weak self] result in
+            guard let self = self, !self.cancelled else { return }
+            switch result {
+            case .success(let message):
+                let data: Data
+                switch message {
+                case .data(let d): data = d
+                case .string(let s): data = Data(s.utf8)
+                @unknown default:
+                    self.receiveLoop()
+                    return
                 }
-                return
-            }
-            defer { freeaddrinfo(res) }
-
-            let family = ai.pointee.ai_family
-            let familyName = family == AF_INET6 ? "IPv6" : "IPv4"
-            AgarBot.log("[\(self.name)] resolved \(familyName)")
-
-            let fd = Darwin.socket(family, SOCK_STREAM, IPPROTO_TCP)
-            guard fd >= 0 else {
-                let e = errno
-                AgarBot.log("[\(self.name)] socket() failed errno=\(e)")
-                DispatchQueue.main.async {
-                    self.lastError = "socket errno=\(e)"
-                    self.state = .disconnected
+                self.handlePacket(data)
+                self.receiveLoop()
+            case .failure(let error):
+                if !self.cancelled {
+                    AgarBot.log("[\(self.name)] recv error: \(error.localizedDescription)")
+                    self.lastError = error.localizedDescription
+                    self.disconnect()
                 }
-                return
-            }
-
-            var on: Int32 = 1
-            setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
-
-            // non-blocking for connect + poll timeout
-            let origFlags = fcntl(fd, F_GETFL, 0)
-            _ = fcntl(fd, F_SETFL, origFlags | O_NONBLOCK)
-
-            AgarBot.log("[\(self.name)] connect() fd=\(fd) \(familyName)")
-
-            let ret = Darwin.connect(fd, ai.pointee.ai_addr, ai.pointee.ai_addrlen)
-
-            if ret == 0 {
-                AgarBot.log("[\(self.name)] TCP connected instantly fd=\(fd)")
-                DispatchQueue.main.async {
-                    guard !self.cancelled else { Darwin.close(fd); return }
-                    self.sockfd = fd
-                    self.onTCPConnected()
-                }
-                return
-            }
-
-            guard errno == EINPROGRESS else {
-                let e = errno
-                AgarBot.log("[\(self.name)] connect errno=\(e) \(self.errnoName(e))")
-                Darwin.close(fd)
-                DispatchQueue.main.async {
-                    self.lastError = "connect \(self.errnoName(e))"
-                    self.state = .disconnected
-                }
-                return
-            }
-
-            // poll for writability — real 10s timeout
-            var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
-            let pollRet = poll(&pfd, 1, 10_000)
-
-            guard !self.cancelled else { Darwin.close(fd); return }
-
-            if pollRet <= 0 {
-                AgarBot.log("[\(self.name)] connect timeout (poll \(pollRet))")
-                Darwin.close(fd)
-                DispatchQueue.main.async {
-                    self.lastError = "connect timeout"
-                    self.state = .disconnected
-                }
-                return
-            }
-
-            // check actual connect result
-            var sockErr: Int32 = 0
-            var errLen = socklen_t(MemoryLayout<Int32>.size)
-            getsockopt(fd, SOL_SOCKET, SO_ERROR, &sockErr, &errLen)
-
-            if sockErr != 0 {
-                AgarBot.log("[\(self.name)] connect SO_ERROR=\(sockErr) \(self.errnoName(sockErr))")
-                Darwin.close(fd)
-                DispatchQueue.main.async {
-                    self.lastError = "connect \(self.errnoName(sockErr))"
-                    self.state = .disconnected
-                }
-                return
-            }
-
-            AgarBot.log("[\(self.name)] TCP connected! fd=\(fd)")
-
-            DispatchQueue.main.async {
-                guard !self.cancelled else { Darwin.close(fd); return }
-                self.sockfd = fd
-                self.onTCPConnected()
             }
         }
-    }
-
-    private func errnoName(_ e: Int32) -> String {
-        switch e {
-        case 60: return "ETIMEDOUT"
-        case 61: return "ECONNREFUSED"
-        case 54: return "ECONNRESET"
-        case 51: return "ENETUNREACH"
-        case 50: return "ENETDOWN"
-        case 65: return "EHOSTUNREACH"
-        case 36: return "EINPROGRESS"
-        case 48: return "EADDRINUSE"
-        case 22: return "EINVAL"
-        case 0: return "OK"
-        default: return "E?\(e)"
-        }
-    }
-
-    private func onTCPConnected() {
-        connMode = "bsd-tcp"
-
-        // switch to non-blocking for async reads
-        let flags = fcntl(sockfd, F_GETFL, 0)
-        if flags >= 0 { _ = fcntl(sockfd, F_SETFL, flags | O_NONBLOCK) }
-
-        let rs = DispatchSource.makeReadSource(fileDescriptor: sockfd, queue: .main)
-        self.readSource = rs
-        rs.setEventHandler { [weak self] in self?.onReadable() }
-        rs.resume()
-
-        sendWSUpgrade()
-
-        upgradeTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { [weak self] _ in
-            guard let self = self, !self.wsReady else { return }
-            AgarBot.log("[\(self.name)] WS upgrade timeout, trying raw binary")
-            self.connMode = "bsd-raw"
-            self.wsReady = true
-            self.recvBuffer.removeAll()
-            self.state = .connected
-            self.sendGameHandshake()
-        }
-    }
-
-    // MARK: - WebSocket Upgrade
-
-    private func sendWSUpgrade() {
-        var keyBytes = [UInt8](repeating: 0, count: 16)
-        for i in 0..<16 { keyBytes[i] = UInt8.random(in: 0...255) }
-        let wsKey = Data(keyBytes).base64EncodedString()
-
-        let req = "GET / HTTP/1.1\r\n" +
-            "Host: \(serverHostname):\(serverPort)\r\n" +
-            "Upgrade: websocket\r\n" +
-            "Connection: Upgrade\r\n" +
-            "Sec-WebSocket-Key: \(wsKey)\r\n" +
-            "Sec-WebSocket-Version: 13\r\n" +
-            "Origin: https://agar.io\r\n" +
-            "User-Agent: Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)\r\n" +
-            "\r\n"
-        AgarBot.log("[\(name)] sending WS upgrade")
-        sockSend(Data(req.utf8))
-    }
-
-    private func processUpgradeResponse() {
-        guard let end = recvBuffer.range(of: Data("\r\n\r\n".utf8)) else { return }
-        upgradeTimer?.invalidate()
-        upgradeTimer = nil
-
-        let hdr = String(data: recvBuffer.subdata(in: 0..<end.lowerBound), encoding: .utf8) ?? ""
-        let firstLine = hdr.components(separatedBy: "\r\n").first ?? ""
-        recvBuffer.removeSubrange(0..<end.upperBound)
-
-        AgarBot.log("[\(name)] upgrade response: \(firstLine)")
-
-        if hdr.contains("101") {
-            wsReady = true
-            connMode = "bsd-ws"
-            state = .connected
-            AgarBot.log("[\(name)] WS connected, sending handshake")
-            sendGameHandshake()
-            if !recvBuffer.isEmpty { processWSFrames() }
-        } else {
-            wsReady = true
-            connMode = "bsd-raw"
-            recvBuffer.removeAll()
-            state = .connected
-            AgarBot.log("[\(name)] WS rejected, trying raw binary")
-            sendGameHandshake()
-        }
-    }
-
-    // MARK: - Data Reception
-
-    private func onReadable() {
-        var buf = [UInt8](repeating: 0, count: 65536)
-        let n = recv(sockfd, &buf, buf.count, 0)
-
-        if n == 0 {
-            AgarBot.log("[\(name)] server closed connection")
-            lastError = "Server closed"
-            disconnect()
-            return
-        }
-        if n < 0 {
-            if errno == EAGAIN || errno == EWOULDBLOCK { return }
-            AgarBot.log("[\(name)] recv errno=\(errno)")
-            lastError = "recv errno=\(errno)"
-            disconnect()
-            return
-        }
-
-        recvBuffer.append(contentsOf: buf[0..<n])
-
-        if !wsReady {
-            processUpgradeResponse()
-        } else if connMode == "bsd-ws" {
-            processWSFrames()
-        } else {
-            handlePacket(recvBuffer)
-            recvBuffer.removeAll()
-        }
-    }
-
-    // MARK: - WebSocket Frame I/O
-
-    private func processWSFrames() {
-        while recvBuffer.count >= 2 {
-            let b0 = recvBuffer[0]
-            let b1 = recvBuffer[1]
-            let opcode = b0 & 0x0F
-            let masked = (b1 & 0x80) != 0
-            var payloadLen = Int(b1 & 0x7F)
-            var headerLen = 2
-
-            if payloadLen == 126 {
-                guard recvBuffer.count >= 4 else { return }
-                payloadLen = Int(recvBuffer[2]) << 8 | Int(recvBuffer[3])
-                headerLen = 4
-            } else if payloadLen == 127 {
-                guard recvBuffer.count >= 10 else { return }
-                payloadLen = 0
-                for i in 0..<8 { payloadLen = (payloadLen << 8) | Int(recvBuffer[2 + i]) }
-                headerLen = 10
-            }
-
-            let maskLen = masked ? 4 : 0
-            let totalLen = headerLen + maskLen + payloadLen
-            guard recvBuffer.count >= totalLen else { return }
-
-            var payload = Data(recvBuffer[(headerLen + maskLen)..<totalLen])
-            if masked {
-                let mk = Array(recvBuffer[headerLen..<(headerLen + 4)])
-                for i in 0..<payload.count { payload[i] ^= mk[i % 4] }
-            }
-
-            recvBuffer.removeSubrange(0..<totalLen)
-
-            switch opcode {
-            case 0x01, 0x02: handlePacket(payload)
-            case 0x08: disconnect(); return
-            case 0x09: sendWSPong(payload)
-            default: break
-            }
-        }
-    }
-
-    private func wsSend(_ payload: Data) {
-        var frame = Data()
-        frame.append(0x82)
-
-        let len = payload.count
-        if len < 126 {
-            frame.append(UInt8(len) | 0x80)
-        } else if len < 65536 {
-            frame.append(126 | 0x80)
-            frame.append(UInt8((len >> 8) & 0xFF))
-            frame.append(UInt8(len & 0xFF))
-        } else {
-            frame.append(127 | 0x80)
-            for i in (0..<8).reversed() { frame.append(UInt8((len >> (i * 8)) & 0xFF)) }
-        }
-
-        var mask = [UInt8](repeating: 0, count: 4)
-        for i in 0..<4 { mask[i] = UInt8.random(in: 0...255) }
-        frame.append(contentsOf: mask)
-        for i in 0..<len { frame.append(payload[i] ^ mask[i % 4]) }
-        sockSend(frame)
-    }
-
-    private func sendWSPong(_ data: Data) {
-        var frame = Data()
-        frame.append(0x8A)
-        let len = min(data.count, 125)
-        frame.append(UInt8(len) | 0x80)
-        var mask = [UInt8](repeating: 0, count: 4)
-        for i in 0..<4 { mask[i] = UInt8.random(in: 0...255) }
-        frame.append(contentsOf: mask)
-        for i in 0..<len { frame.append(data[i] ^ mask[i % 4]) }
-        sockSend(frame)
-    }
-
-    // MARK: - Socket I/O
-
-    private func sockSend(_ data: Data) {
-        guard sockfd >= 0 else { return }
-        data.withUnsafeBytes { ptr in
-            guard let base = ptr.baseAddress else { return }
-            var sent = 0
-            while sent < data.count {
-                let n = Darwin.send(sockfd, base + sent, data.count - sent, 0)
-                if n <= 0 { return }
-                sent += n
-            }
-        }
-    }
-
-    private func closeSock() {
-        if sockfd >= 0 {
-            Darwin.close(sockfd)
-            sockfd = -1
-        }
-    }
-
-    private func cleanup() {
-        moveTimer?.invalidate()
-        moveTimer = nil
-        upgradeTimer?.invalidate()
-        upgradeTimer = nil
-        readSource?.cancel()
-        readSource = nil
-        closeSock()
     }
 
     // MARK: - Game Protocol
 
     private func sendGameHandshake() {
-        gameSend(AgarProtocol.handshakePacket())
-        gameSend(AgarProtocol.connectionKeyPacket())
+        let hs = AgarProtocol.handshakePacket()
+        let ck = AgarProtocol.connectionKeyPacket()
+        gameSend(hs)
+        gameSend(ck)
+        let hsHex = hs.map { String(format: "%02x", $0) }.joined(separator: " ")
+        let ckHex = ck.map { String(format: "%02x", $0) }.joined(separator: " ")
+        AgarBot.log("[\(name)] handshake=[\(hsHex)] key=[\(ckHex)]")
         if !serverToken.isEmpty {
             gameSend(AgarProtocol.facebookTokenPacket(token: serverToken))
+            AgarBot.log("[\(name)] token sent (\(serverToken.count) chars)")
         }
     }
 
     private func gameSend(_ data: Data) {
-        if connMode == "bsd-ws" {
-            wsSend(data)
-        } else {
-            sockSend(data)
+        guard !cancelled else { return }
+        webSocketTask?.send(.data(data)) { [weak self] error in
+            if let error = error, let self = self, !self.cancelled {
+                AgarBot.log("[\(self.name)] send error: \(error.localizedDescription)")
+            }
         }
     }
 
@@ -446,8 +159,6 @@ class AgarBot: Identifiable {
     func disconnect() {
         cancelled = true
         cleanup()
-        recvBuffer.removeAll()
-        wsReady = false
         if state != .disconnected {
             AgarBot.log("[\(name)] disconnected: \(lastError)")
             state = .disconnected
@@ -471,9 +182,44 @@ class AgarBot: Identifiable {
     // MARK: - Packet Handling
 
     private func handlePacket(_ data: Data) {
-        guard let packet = AgarProtocol.parsePacket(data) else { return }
+        serverPacketCount += 1
+
+        if data.first == 0xF1 && xorKey == nil {
+            if data.count >= 5 {
+                xorKey = [data[1], data[2], data[3], data[4]]
+                let ver = data.count > 5 ? (String(data: data[5...], encoding: .utf8)?.replacingOccurrences(of: "\0", with: "") ?? "") : ""
+                AgarBot.log("[\(name)] VERSION \"\(ver)\" xorKey=[\(xorKey!.map { String(format: "%02x", $0) }.joined())]")
+            }
+            return
+        }
+
+        let decoded: Data
+        if let key = xorKey {
+            decoded = AgarProtocol.xorApply(data, key: key)
+        } else {
+            decoded = data
+        }
+
+        guard let packet = AgarProtocol.parsePacket(decoded) else {
+            if serverPacketCount <= 10 {
+                let hex = decoded.prefix(20).map { String(format: "%02x", $0) }.joined()
+                AgarBot.log("[\(name)] unparsed #\(serverPacketCount) op=0x\(String(format: "%02x", decoded.first ?? 0)) len=\(decoded.count) \(hex)")
+            }
+            return
+        }
 
         switch packet {
+        case .version(let key, let ver):
+            xorKey = key
+            AgarBot.log("[\(name)] VERSION(parsed) \"\(ver)\"")
+
+        case .ack:
+            AgarBot.log("[\(name)] ACK — spawning")
+            if state == .connecting || state == .connected {
+                state = .connected
+                spawn()
+            }
+
         case .worldUpdate(let eatRecords, let updates, let removals):
             for update in updates { cells[update.id] = update }
             for removal in removals { cells.removeValue(forKey: removal) }
@@ -504,7 +250,7 @@ class AgarBot: Identifiable {
 
         case .worldBorder(let border):
             worldBorder = border
-            AgarBot.log("[\(name)] got world border, spawning")
+            AgarBot.log("[\(name)] world border, spawning")
             if state == .connecting || state == .connected {
                 state = .connected
                 spawn()
@@ -520,6 +266,42 @@ class AgarBot: Identifiable {
                 isAlive = false
                 state = .dead
                 handleDeath()
+            }
+
+        case .unknown(let opcode, let raw):
+            if serverPacketCount <= 15 {
+                let hex = raw.prefix(20).map { String(format: "%02x", $0) }.joined()
+                AgarBot.log("[\(name)] unknown op=0x\(String(format: "%02x", opcode)) len=\(raw.count) \(hex)")
+            }
+            if raw.count == 33 {
+                let reader = BinaryReader(data: raw)
+                reader.skip(1)
+                let minX = reader.readFloat64()
+                let minY = reader.readFloat64()
+                let maxX = reader.readFloat64()
+                let maxY = reader.readFloat64()
+                if abs(minX) < 50000 && abs(maxX) < 50000 && maxX > minX && maxY > minY {
+                    worldBorder = WorldBorder(minX: minX, minY: minY, maxX: maxX, maxY: maxY)
+                    AgarBot.log("[\(name)] heuristic world border \(worldBorder)")
+                    if state == .connecting || state == .connected {
+                        state = .connected
+                        spawn()
+                    }
+                }
+            }
+            if raw.count >= 5 && raw.count <= 33 && (raw.count - 1) % 4 == 0 {
+                let reader = BinaryReader(data: raw)
+                reader.skip(1)
+                var ids: [UInt32] = []
+                while reader.hasMore { ids.append(reader.readUInt32()) }
+                if !ids.isEmpty && ids.allSatisfy({ $0 > 0 && $0 < 0xFFFFFF }) {
+                    ownIDs = ids
+                    isAlive = true
+                    state = .alive
+                    AgarBot.log("[\(name)] heuristic ALIVE ids=\(ids)")
+                    delegate?.bot(self, didSpawnWithIDs: ids)
+                    startMovementLoop()
+                }
             }
 
         default:
@@ -587,8 +369,61 @@ class AgarBot: Identifiable {
         moveTimer?.invalidate()
         moveTimer = nil
         respawnCount += 1
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-            self?.spawn()
+        if respawnCount > 20 {
+            AgarBot.log("[\(name)] max respawns reached, disconnecting")
+            lastError = "max respawns"
+            disconnect()
+            return
+        }
+        let delay = respawnCount > 10 ? 3.0 : 1.0
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self = self, !self.cancelled else { return }
+            self.spawn()
+        }
+    }
+
+    private func cleanup() {
+        moveTimer?.invalidate()
+        moveTimer = nil
+        webSocketTask?.cancel(with: .goingAway, reason: nil)
+        webSocketTask = nil
+        urlSession?.invalidateAndCancel()
+        urlSession = nil
+    }
+}
+
+// MARK: - URLSessionWebSocketDelegate
+
+extension AgarBot: URLSessionWebSocketDelegate {
+    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocol: String?) {
+        AgarBot.log("[\(name)] WSS connected to \(serverHostname):\(serverPort)")
+        state = .connected
+        sendGameHandshake()
+    }
+
+    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
+        let reasonStr = reason.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        AgarBot.log("[\(name)] WS closed: \(closeCode.rawValue) reason=\"\(reasonStr)\" pkts=\(serverPacketCount)")
+        if !cancelled {
+            lastError = "WS closed (\(closeCode.rawValue)) pkts=\(serverPacketCount)"
+            disconnect()
+        }
+    }
+
+    func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+           let trust = challenge.protectionSpace.serverTrust {
+            completionHandler(.useCredential, URLCredential(trust: trust))
+        } else {
+            completionHandler(.performDefaultHandling, nil)
+        }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        if let error = error, !cancelled {
+            AgarBot.log("[\(name)] task error: \(error.localizedDescription)")
+            lastError = error.localizedDescription
+            disconnect()
         }
     }
 }

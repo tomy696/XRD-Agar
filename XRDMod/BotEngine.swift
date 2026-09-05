@@ -132,11 +132,15 @@ class BotEngine: ObservableObject {
 
     private func postDiag(_ event: String) {
         var L: [String] = []
-        L.append("v20 \(event)")
+        L.append("v23-wss \(event)")
         L.append("bots: spawned=\(totalSpawned) alive=\(totalAlive) running=\(isRunning)")
         L.append("status: \(statusMessage)")
+        L.append("server: \(lastResolvedURL ?? "none")")
+        L.append("net.best: \(NetworkInterceptor.shared.bestServerURL ?? "none")")
+        L.append("net.bsd: \(NetworkInterceptor.shared.bsdCapturedServer ?? "none")")
+        L.append("net.ip: \(NetworkInterceptor.shared.capturedServerIP ?? "none"):\(NetworkInterceptor.shared.capturedServerPort ?? 0)")
         for bot in bots {
-            L.append("  \(bot.name): \(bot.state) mode=\(bot.connMode) err=\(bot.lastError)")
+            L.append("  \(bot.name): \(bot.state) mode=\(bot.connMode) host=\(bot.serverHostname) pkts=\(bot.serverPacketCount) err=\(bot.lastError)")
         }
         L.append("log(\(AgarBot.recentLog.count)):")
         for entry in AgarBot.recentLog.suffix(25) { L.append("  \(entry)") }

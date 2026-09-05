@@ -1,7 +1,6 @@
 import UIKit
 import SwiftUI
 import WebKit
-import Combine
 import MachO
 
 class XRDOverlay: NSObject {
@@ -15,13 +14,9 @@ class XRDOverlay: NSObject {
     private weak var gameWindow: UIWindow?
     private var container: XRDPassthroughView?
     private var toggleBtn: ToggleButton?
-    private var macroBtn: MacroButton?
-    private var macroDragHandle: MacroDragHandle?
     private var menuHosting: UIHostingController<AnyView>?
     private var licenseHosting: UIHostingController<AnyView>?
     private var isMenuVisible = false
-    private var feedTimer: Timer?
-    private var cancellables = Set<AnyCancellable>()
 
     func setup() {
         NetworkInterceptor.shared.install()
@@ -40,22 +35,12 @@ class XRDOverlay: NSObject {
         settings.load()
         installContainer()
         observeLifecycle()
-        setupObservers()
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
             guard let self = self else { return }
             self.jsBridge.setup(in: mainWindow)
             self.zoomEngine.jsBridge = self.jsBridge
             self.zoomEngine.setup(window: mainWindow)
-
-            self.jsBridge.onConnected = { [weak self] in
-                guard let self = self else { return }
-                if self.settings.isMacroEnabled {
-                    let ms = Int(self.settings.feedInterval * 1000)
-                    self.jsBridge.setFeedInterval(ms)
-                }
-            }
-
             self.readGameConfig()
         }
 
@@ -81,42 +66,9 @@ class XRDOverlay: NSObject {
             installContainer()
             if LicenseManager.shared.isValid {
                 addToggleButton()
-                if settings.isMacroEnabled { addMacroButton() }
             }
         }
         if let c = container { window.bringSubviewToFront(c) }
-    }
-
-    private func setupObservers() {
-        settings.$isMacroEnabled
-            .dropFirst()
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] enabled in
-                if enabled {
-                    self?.addMacroButton()
-                    self?.startFeedTimer()
-                } else {
-                    self?.removeMacroButton()
-                }
-            }
-            .store(in: &cancellables)
-
-        settings.$macroPower
-            .dropFirst()
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                guard let self = self, self.settings.isMacroEnabled else { return }
-                self.startFeedTimer()
-            }
-            .store(in: &cancellables)
-
-        settings.$macroButtonSize
-            .dropFirst()
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] size in
-                self?.updateMacroSize(CGFloat(size))
-            }
-            .store(in: &cancellables)
     }
 
     private func observeLifecycle() {
@@ -128,32 +80,6 @@ class XRDOverlay: NSObject {
 
     @objc private func appActivated() {
         DispatchQueue.main.async { [weak self] in self?.ensureContainer() }
-    }
-
-    // MARK: - Feed Timer
-
-    private func startFeedTimer() {
-        feedTimer?.invalidate()
-        let interval = settings.feedInterval
-        if jsBridge.isConnected {
-            jsBridge.setFeedInterval(Int(interval * 1000))
-            return
-        }
-        feedTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            if let bridge = self?.jsBridge, bridge.isConnected {
-                bridge.sendFeed()
-            } else {
-                NetworkInterceptor.shared.sendFeed()
-            }
-        }
-    }
-
-    private func stopFeedTimer() {
-        feedTimer?.invalidate()
-        feedTimer = nil
-        if jsBridge.isConnected {
-            jsBridge.setFeedInterval(0)
-        }
     }
 
     // MARK: - License
@@ -182,10 +108,6 @@ class XRDOverlay: NSObject {
 
     private func showOverlayUI() {
         addToggleButton()
-        if settings.isMacroEnabled {
-            addMacroButton()
-            startFeedTimer()
-        }
     }
 
     private func addToggleButton() {
@@ -198,53 +120,6 @@ class XRDOverlay: NSObject {
         btn.onTap = { [weak self] in self?.toggleMenu() }
         c.addSubview(btn)
         toggleBtn = btn
-    }
-
-    private func addMacroButton() {
-        ensureContainer()
-        guard let c = container else { return }
-        macroBtn?.removeFromSuperview()
-        macroDragHandle?.removeFromSuperview()
-
-        let size = CGFloat(settings.macroButtonSize)
-        let btn = MacroButton(frame: CGRect(x: 50, y: c.bounds.height - size - 50, width: size, height: size))
-        btn.autoresizingMask = [.flexibleTopMargin, .flexibleRightMargin]
-        c.addSubview(btn)
-        macroBtn = btn
-
-        let handleSize: CGFloat = 36
-        let handle = MacroDragHandle(frame: CGRect(
-            x: btn.frame.maxX + 6,
-            y: btn.frame.midY - handleSize / 2,
-            width: handleSize,
-            height: handleSize
-        ))
-        handle.onDrag = { [weak self] delta in
-            guard let btn = self?.macroBtn, let h = self?.macroDragHandle else { return }
-            btn.center = CGPoint(x: btn.center.x + delta.x, y: btn.center.y + delta.y)
-            h.center = CGPoint(x: h.center.x + delta.x, y: h.center.y + delta.y)
-        }
-        c.addSubview(handle)
-        macroDragHandle = handle
-    }
-
-    private func removeMacroButton() {
-        stopFeedTimer()
-        macroBtn?.removeFromSuperview()
-        macroBtn = nil
-        macroDragHandle?.removeFromSuperview()
-        macroDragHandle = nil
-    }
-
-    private func updateMacroSize(_ size: CGFloat) {
-        guard let btn = macroBtn else { return }
-        let cx = btn.center.x
-        let cy = btn.center.y
-        btn.bounds = CGRect(x: 0, y: 0, width: size, height: size)
-        btn.center = CGPoint(x: cx, y: cy)
-        btn.layer.cornerRadius = size / 2
-        btn.setNeedsDisplay()
-        macroDragHandle?.center = CGPoint(x: btn.frame.maxX + 6 + 18, y: cy)
     }
 
     // MARK: - Menu
@@ -459,7 +334,6 @@ class XRDOverlay: NSObject {
         for (i, bot) in botEngine.bots.prefix(5).enumerated() {
             L.append("  Bot[\(i)]: \(bot.state) mode=\(bot.connMode) ip=\(bot.serverIP):\(bot.serverPort) err=\(bot.lastError)")
         }
-        L.append("Macro: on=\(settings.isMacroEnabled) power=\(settings.macroPower)")
         L.append("Bots.log(\(AgarBot.recentLog.count)):")
         for entry in AgarBot.recentLog.suffix(20) { L.append("  \(entry)") }
 
@@ -909,85 +783,3 @@ class ToggleButton: UIView {
     }
 }
 
-// MARK: - Macro Button (FEED indicator, not draggable)
-
-class MacroButton: UIView {
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        isOpaque = false
-        backgroundColor = .clear
-        layer.cornerRadius = frame.width / 2
-        clipsToBounds = true
-        isUserInteractionEnabled = false
-    }
-
-    required init?(coder: NSCoder) { fatalError() }
-
-    override func draw(_ rect: CGRect) {
-        guard let ctx = UIGraphicsGetCurrentContext() else { return }
-
-        ctx.setFillColor(UIColor(red: 0.1, green: 0.5, blue: 0.2, alpha: 0.6).cgColor)
-        ctx.fillEllipse(in: bounds.insetBy(dx: 1, dy: 1))
-
-        let green = UIColor(red: 0.2, green: 0.85, blue: 0.4, alpha: 0.8)
-        ctx.setStrokeColor(green.cgColor)
-        ctx.setLineWidth(2)
-        ctx.strokeEllipse(in: bounds.insetBy(dx: 1, dy: 1))
-
-        let c = CGPoint(x: bounds.midX, y: bounds.midY)
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: UIFont.systemFont(ofSize: 11, weight: .black),
-            .foregroundColor: UIColor.white
-        ]
-        let text = "FEED"
-        let size = (text as NSString).size(withAttributes: attrs)
-        (text as NSString).draw(
-            at: CGPoint(x: c.x - size.width / 2, y: c.y - size.height / 2),
-            withAttributes: attrs
-        )
-    }
-}
-
-// MARK: - Macro Drag Handle (moves the FEED button)
-
-class MacroDragHandle: UIView {
-    var onDrag: ((CGPoint) -> Void)?
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        backgroundColor = UIColor.black.withAlphaComponent(0.6)
-        layer.cornerRadius = frame.width / 2
-        layer.borderWidth = 2
-        layer.borderColor = UIColor(red: 0.2, green: 0.8, blue: 0.9, alpha: 0.9).cgColor
-
-        let icon = UILabel(frame: bounds)
-        icon.text = "✥"
-        icon.font = .systemFont(ofSize: 18, weight: .bold)
-        icon.textColor = UIColor(red: 0.2, green: 0.8, blue: 0.9, alpha: 1.0)
-        icon.textAlignment = .center
-        icon.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        addSubview(icon)
-    }
-
-    required init?(coder: NSCoder) { fatalError() }
-
-    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard let t = touches.first else { return }
-        let loc = t.location(in: superview)
-        let prev = t.previousLocation(in: superview)
-        let delta = CGPoint(x: loc.x - prev.x, y: loc.y - prev.y)
-        onDrag?(delta)
-    }
-
-    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        UIView.animate(withDuration: 0.1) { self.alpha = 0.5 }
-    }
-
-    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
-        UIView.animate(withDuration: 0.1) { self.alpha = 1 }
-    }
-
-    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
-        UIView.animate(withDuration: 0.1) { self.alpha = 1 }
-    }
-}
