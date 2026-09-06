@@ -38,6 +38,26 @@ static void bsd_hook_init(void) {
     g_dnsOverrides = [NSMutableDictionary new];
     g_candidates = [NSMutableArray new];
     g_ready = YES;
+
+    [[NSNotificationCenter defaultCenter]
+        addObserverForName:@"XRDSetDNSOverride" object:nil queue:nil
+        usingBlock:^(NSNotification *notif) {
+            NSString *hostname = notif.userInfo[@"host"];
+            NSString *ip = notif.userInfo[@"ip"];
+            if (hostname && ip) {
+                @synchronized(g_dnsOverrides) {
+                    g_dnsOverrides[hostname] = ip;
+                }
+            }
+        }];
+
+    [[NSNotificationCenter defaultCenter]
+        addObserverForName:@"XRDClearDNSOverrides" object:nil queue:nil
+        usingBlock:^(NSNotification *notif) {
+            @synchronized(g_dnsOverrides) {
+                [g_dnsOverrides removeAllObjects];
+            }
+        }];
 }
 
 #pragma mark - connect() hook

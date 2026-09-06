@@ -33,11 +33,8 @@ class ServerResolver {
     }
 
     private static func findRegionFromBSDLog() -> String? {
-        guard let bsdClass = NSClassFromString("XRDBSDHook") else { return nil }
-        let sel = NSSelectorFromString("capturedDNS")
-        guard bsdClass.responds(to: sel),
-              let result = bsdClass.perform(sel)?.takeUnretainedValue() as? [String] else { return nil }
-        for entry in result.reversed() {
+        let dnsLog = UserDefaults.standard.stringArray(forKey: "XRD_bsdDNS") ?? []
+        for entry in dnsLog.reversed() {
             for region in gameRegions {
                 if entry.contains(region) { return region }
             }
@@ -46,19 +43,17 @@ class ServerResolver {
     }
 
     private static func setDNSOverride(hostname: String, ip: String) {
-        guard let bsdClass = NSClassFromString("XRDBSDHook") else { return }
-        let sel = NSSelectorFromString("setDNSOverride:")
-        if bsdClass.responds(to: sel) {
-            bsdClass.perform(sel, with: ["host": hostname, "ip": ip])
-        }
+        NotificationCenter.default.post(
+            name: NSNotification.Name("XRDSetDNSOverride"),
+            object: nil, userInfo: ["host": hostname, "ip": ip]
+        )
     }
 
     static func clearDNSOverrides() {
-        guard let bsdClass = NSClassFromString("XRDBSDHook") else { return }
-        let sel = NSSelectorFromString("clearDNSOverrides")
-        if bsdClass.responds(to: sel) {
-            bsdClass.perform(sel)
-        }
+        NotificationCenter.default.post(
+            name: NSNotification.Name("XRDClearDNSOverrides"),
+            object: nil
+        )
     }
 
     private static func resolveHostnameForIP(
