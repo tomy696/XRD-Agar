@@ -89,12 +89,21 @@ class AgarBot: NSObject, Identifiable {
         cancelled = false
         xorKey = nil
         serverPacketCount = 0
+        triedTLS = false
+        triedPlain = false
 
-        connectWithTLS(true)
+        // Port 443 = standard TLS, try wss first
+        // Dynamic ports (20982 etc) = likely plain WS, try ws first
+        connectWithTLS(serverPort == 443)
     }
+
+    private var triedTLS = false
+    private var triedPlain = false
 
     private func connectWithTLS(_ useTLS: Bool) {
         guard !cancelled else { return }
+
+        if useTLS { triedTLS = true } else { triedPlain = true }
         connMode = useTLS ? "wss" : "ws"
 
         guard let port = NWEndpoint.Port(rawValue: UInt16(serverPort)) else {
@@ -141,22 +150,24 @@ class AgarBot: NSObject, Identifiable {
                 self.receiveLoop()
             case .failed(let error):
                 AgarBot.log("[\(self.name)] \(self.connMode) failed: \(error)")
-                if useTLS {
-                    self.nwConnection?.cancel()
-                    self.nwConnection = nil
-                    AgarBot.log("[\(self.name)] trying ws:// fallback")
-                    self.connectWithTLS(false)
+                self.nwConnection?.cancel()
+                self.nwConnection = nil
+                let canFallback = useTLS ? !self.triedPlain : !self.triedTLS
+                if canFallback {
+                    AgarBot.log("[\(self.name)] trying \(useTLS ? "ws" : "wss"):// fallback")
+                    self.connectWithTLS(!useTLS)
                 } else {
                     self.lastError = error.localizedDescription
                     self.disconnect()
                 }
             case .waiting(let error):
                 AgarBot.log("[\(self.name)] waiting: \(error)")
-                if useTLS {
-                    self.nwConnection?.cancel()
-                    self.nwConnection = nil
-                    AgarBot.log("[\(self.name)] waiting state, trying ws://")
-                    self.connectWithTLS(false)
+                self.nwConnection?.cancel()
+                self.nwConnection = nil
+                let canFallback = useTLS ? !self.triedPlain : !self.triedTLS
+                if canFallback {
+                    AgarBot.log("[\(self.name)] waiting, trying \(useTLS ? "ws" : "wss")://")
+                    self.connectWithTLS(!useTLS)
                 } else {
                     self.lastError = error.localizedDescription
                     self.disconnect()
@@ -168,13 +179,14 @@ class AgarBot: NSObject, Identifiable {
 
         connection.start(queue: .main)
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 10.0) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8.0) { [weak self] in
             guard let self = self, !self.cancelled, self.state == .connecting else { return }
-            if useTLS {
-                AgarBot.log("[\(self.name)] wss timeout, trying ws://")
-                self.nwConnection?.cancel()
-                self.nwConnection = nil
-                self.connectWithTLS(false)
+            self.nwConnection?.cancel()
+            self.nwConnection = nil
+            let canFallback = useTLS ? !self.triedPlain : !self.triedTLS
+            if canFallback {
+                AgarBot.log("[\(self.name)] \(self.connMode) timeout, trying \(useTLS ? "ws" : "wss")://")
+                self.connectWithTLS(!useTLS)
             } else {
                 self.lastError = "connection timeout"
                 self.disconnect()
