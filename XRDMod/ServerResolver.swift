@@ -32,6 +32,35 @@ class ServerResolver {
         }
     }
 
+    private static func findRegionFromBSDLog() -> String? {
+        guard let bsdClass = NSClassFromString("XRDBSDHook") else { return nil }
+        let sel = NSSelectorFromString("capturedDNS")
+        guard bsdClass.responds(to: sel),
+              let result = bsdClass.perform(sel)?.takeUnretainedValue() as? [String] else { return nil }
+        for entry in result.reversed() {
+            for region in gameRegions {
+                if entry.contains(region) { return region }
+            }
+        }
+        return nil
+    }
+
+    private static func setDNSOverride(hostname: String, ip: String) {
+        guard let bsdClass = NSClassFromString("XRDBSDHook") else { return }
+        let sel = NSSelectorFromString("setDNSOverride:")
+        if bsdClass.responds(to: sel) {
+            bsdClass.perform(sel, with: ["host": hostname, "ip": ip])
+        }
+    }
+
+    static func clearDNSOverrides() {
+        guard let bsdClass = NSClassFromString("XRDBSDHook") else { return }
+        let sel = NSSelectorFromString("clearDNSOverrides")
+        if bsdClass.responds(to: sel) {
+            bsdClass.perform(sel)
+        }
+    }
+
     private static func resolveHostnameForIP(
         _ ip: String,
         port: Int,
@@ -40,6 +69,7 @@ class ServerResolver {
     ) {
         if let cached = NetworkInterceptor.shared.capturedServerHostname,
            !cached.isEmpty, !isIPAddress(cached) {
+            setDNSOverride(hostname: cached, ip: ip)
             completion(ServerInfo(
                 url: "wss://\(cached):\(port)",
                 token: token, ip: ip, port: port, hostname: cached
@@ -82,10 +112,14 @@ class ServerResolver {
                 }
             }
 
+            // Reverse DNS didn't match — use DNS override to force hostname → IP
+            let hostname = findRegionFromBSDLog() ?? gameRegions[0]
+            setDNSOverride(hostname: hostname, ip: ip)
+
             DispatchQueue.main.async {
                 completion(ServerInfo(
-                    url: "wss://\(ip):\(port)",
-                    token: token, ip: ip, port: port, hostname: ip
+                    url: "wss://\(hostname):\(port)",
+                    token: token, ip: ip, port: port, hostname: hostname
                 ))
             }
         }

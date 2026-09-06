@@ -57,6 +57,7 @@ class BotEngine: ObservableObject {
         totalSpawned = 0
         isRunning = false
         statusMessage = "Stopped"
+        ServerResolver.clearDNSOverrides()
     }
 
     func updateTarget(x: Double, y: Double) {
