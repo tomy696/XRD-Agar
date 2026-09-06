@@ -2,12 +2,93 @@ import Foundation
 
 class ServerResolver {
 
+    private static let gameRegions = [
+        "eu-west-3.mobile-live-v26.agario.miniclippt.com",
+        "us-east-1.mobile-live-v26.agario.miniclippt.com",
+        "us-west-2.mobile-live-v26.agario.miniclippt.com",
+        "ap-southeast-1.mobile-live-v26.agario.miniclippt.com",
+        "ap-northeast-1.mobile-live-v26.agario.miniclippt.com",
+        "eu-west-1.mobile-live-v26.agario.miniclippt.com",
+        "sa-east-1.mobile-live-v26.agario.miniclippt.com",
+        "ap-south-1.mobile-live-v26.agario.miniclippt.com",
+        "eu-central-1.mobile-live-v26.agario.miniclippt.com",
+        "ap-southeast-2.mobile-live-v26.agario.miniclippt.com"
+    ]
+
     struct ServerInfo {
         let url: String
         let token: String
         let ip: String
         let port: Int
         let hostname: String
+    }
+
+    private static func isIPAddress(_ host: String) -> Bool {
+        var sin = sockaddr_in()
+        var sin6 = sockaddr_in6()
+        return host.withCString { cs in
+            inet_pton(AF_INET, cs, &sin.sin_addr) == 1 ||
+            inet_pton(AF_INET6, cs, &sin6.sin6_addr) == 1
+        }
+    }
+
+    private static func resolveHostnameForIP(
+        _ ip: String,
+        port: Int,
+        token: String,
+        completion: @escaping (ServerInfo) -> Void
+    ) {
+        if let cached = NetworkInterceptor.shared.capturedServerHostname,
+           !cached.isEmpty, !isIPAddress(cached) {
+            completion(ServerInfo(
+                url: "wss://\(cached):\(port)",
+                token: token, ip: ip, port: port, hostname: cached
+            ))
+            return
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            for region in gameRegions {
+                var hints = addrinfo(
+                    ai_flags: 0, ai_family: AF_INET, ai_socktype: SOCK_STREAM,
+                    ai_protocol: 0, ai_addrlen: 0, ai_canonname: nil,
+                    ai_addr: nil, ai_next: nil
+                )
+                var result: UnsafeMutablePointer<addrinfo>?
+                guard getaddrinfo(region, nil, &hints, &result) == 0,
+                      let res = result else { continue }
+                defer { freeaddrinfo(res) }
+
+                var rp: UnsafeMutablePointer<addrinfo>? = res
+                while let current = rp {
+                    if current.pointee.ai_family == AF_INET,
+                       let addr = current.pointee.ai_addr {
+                        var buf = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
+                        addr.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { sin in
+                            var sinAddr = sin.pointee.sin_addr
+                            inet_ntop(AF_INET, &sinAddr, &buf, socklen_t(INET_ADDRSTRLEN))
+                        }
+                        if String(cString: buf) == ip {
+                            DispatchQueue.main.async {
+                                completion(ServerInfo(
+                                    url: "wss://\(region):\(port)",
+                                    token: token, ip: ip, port: port, hostname: region
+                                ))
+                            }
+                            return
+                        }
+                    }
+                    rp = current.pointee.ai_next
+                }
+            }
+
+            DispatchQueue.main.async {
+                completion(ServerInfo(
+                    url: "wss://\(ip):\(port)",
+                    token: token, ip: ip, port: port, hostname: ip
+                ))
+            }
+        }
     }
 
     static func resolveServer(
@@ -23,6 +104,13 @@ class ServerResolver {
             let port = parsed.port ?? 443
             let ip = interceptor.capturedServerIP ?? host
 
+            if isIPAddress(host) {
+                resolveHostnameForIP(ip, port: port, token: token) { info in
+                    completion(.success(info))
+                }
+                return
+            }
+
             completion(.success(ServerInfo(url: wsURL, token: token, ip: ip, port: port, hostname: host)))
             return
         }
@@ -30,8 +118,16 @@ class ServerResolver {
         if let bsdServer = UserDefaults.standard.string(forKey: "XRD_bsdServer"),
            !bsdServer.isEmpty,
            let parsed = URLComponents(string: bsdServer), let host = parsed.host {
-            let p = parsed.port ?? 443
-            completion(.success(ServerInfo(url: bsdServer, token: partyCode, ip: host, port: p, hostname: host)))
+            let port = parsed.port ?? 443
+
+            if isIPAddress(host) {
+                resolveHostnameForIP(host, port: port, token: partyCode) { info in
+                    completion(.success(info))
+                }
+                return
+            }
+
+            completion(.success(ServerInfo(url: bsdServer, token: partyCode, ip: host, port: port, hostname: host)))
             return
         }
 
@@ -94,7 +190,13 @@ class ServerResolver {
             let wsURL = server.hasPrefix("wss://") ? server : "wss://\(server)"
             if let parsed = URLComponents(string: wsURL), let host = parsed.host {
                 let p = parsed.port ?? 443
-                completion(.success(ServerInfo(url: wsURL, token: token, ip: host, port: p, hostname: host)))
+                if isIPAddress(host) {
+                    resolveHostnameForIP(host, port: p, token: token) { info in
+                        completion(.success(info))
+                    }
+                } else {
+                    completion(.success(ServerInfo(url: wsURL, token: token, ip: host, port: p, hostname: host)))
+                }
             } else {
                 completion(.failure(ServerError.invalidResponse))
             }
