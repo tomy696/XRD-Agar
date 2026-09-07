@@ -31,7 +31,7 @@ class AgarBot: NSObject, Identifiable, URLSessionWebSocketDelegate {
     private(set) var lastError: String = ""
 
     static var recentLog: [String] = []
-    private static func log(_ msg: String) {
+    static func log(_ msg: String) {
         DispatchQueue.main.async {
             if recentLog.count >= 30 { recentLog.removeFirst() }
             recentLog.append(msg)
@@ -73,18 +73,9 @@ class AgarBot: NSObject, Identifiable, URLSessionWebSocketDelegate {
 
     private var connectHost: String {
         if !serverHostname.isEmpty {
-            if serverHostname.contains("mobile-live") {
-                return "web-arenas-live-v25-0.agario.miniclippt.com"
-            }
-            var sin = sockaddr_in()
-            var sin6 = sockaddr_in6()
-            let isIP = serverHostname.withCString { cs in
-                inet_pton(AF_INET, cs, &sin.sin_addr) == 1 ||
-                inet_pton(AF_INET6, cs, &sin6.sin6_addr) == 1
-            }
-            if !isIP { return serverHostname }
+            return serverHostname
         }
-        return "web-arenas-live-v25-0.agario.miniclippt.com"
+        return ServerResolver.wsServers[0]
     }
 
     // MARK: - Connection
@@ -133,6 +124,8 @@ class AgarBot: NSObject, Identifiable, URLSessionWebSocketDelegate {
 
         var request = URLRequest(url: url)
         request.setValue("https://agar.io", forHTTPHeaderField: "Origin")
+        request.setValue("https://agar.io/", forHTTPHeaderField: "Referer")
+        request.setValue(ServerResolver.browserUA, forHTTPHeaderField: "User-Agent")
         let task = urlSession!.webSocketTask(with: request)
         self.webSocketTask = task
         task.resume()
