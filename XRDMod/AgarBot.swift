@@ -75,7 +75,10 @@ class AgarBot: NSObject, Identifiable, URLSessionWebSocketDelegate {
         if !serverHostname.isEmpty {
             return serverHostname
         }
-        return ServerResolver.wsServers[0]
+        if !serverIP.isEmpty {
+            return serverIP
+        }
+        return ServerResolver.webBouncer
     }
 
     // MARK: - Connection
@@ -120,7 +123,9 @@ class AgarBot: NSObject, Identifiable, URLSessionWebSocketDelegate {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 12
         config.timeoutIntervalForResource = 30
-        urlSession = URLSession(configuration: config, delegate: self, delegateQueue: .main)
+        let session = URLSession(configuration: config, delegate: self, delegateQueue: .main)
+        NetworkInterceptor.shared.botSessions.add(session)
+        urlSession = session
 
         var request = URLRequest(url: url)
         request.setValue("https://agar.io", forHTTPHeaderField: "Origin")
