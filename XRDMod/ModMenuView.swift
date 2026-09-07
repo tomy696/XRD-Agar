@@ -167,17 +167,7 @@ struct ModMenuView: View {
             .sectionStyle()
 
             VStack(alignment: .leading, spacing: 4) {
-                if zoomEngine.activeMethod == .jsHook {
-                    HStack(spacing: 4) {
-                        Circle().fill(Color.green).frame(width: 5, height: 5)
-                        Text("JS zoom actif")
-                            .font(.system(size: 8, design: .monospaced))
-                            .foregroundColor(.green.opacity(0.8))
-                    }
-                    Text("< 1x = dezoom (voir plus loin)")
-                        .font(.system(size: 7, design: .monospaced))
-                        .foregroundColor(.gray.opacity(0.6))
-                } else if zoomEngine.activeMethod == .engineHook || zoomEngine.activeMethod == .objcHook {
+                if zoomEngine.activeMethod == .engineHook || zoomEngine.activeMethod == .objcHook {
                     HStack(spacing: 4) {
                         Circle().fill(Color.green).frame(width: 5, height: 5)
                         Text("Engine hook actif")
@@ -191,16 +181,13 @@ struct ModMenuView: View {
                             .font(.system(size: 8, design: .monospaced))
                             .foregroundColor(.orange.opacity(0.8))
                     }
-                    if !zoomEngine.debugInfo.isEmpty {
-                        Text(zoomEngine.debugInfo)
-                            .font(.system(size: 7, design: .monospaced))
-                            .foregroundColor(.gray.opacity(0.6))
-                    } else {
-                        Text("Recherche WebView...")
-                            .font(.system(size: 7, design: .monospaced))
-                            .foregroundColor(.gray.opacity(0.6))
-                    }
                 }
+                Text("Pinch 2 doigts = zoom")
+                    .font(.system(size: 7, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.6))
+                Text("Double-tap 2 doigts = reset")
+                    .font(.system(size: 7, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.6))
             }
             .sectionStyle()
 

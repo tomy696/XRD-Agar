@@ -449,11 +449,10 @@ class XRDOverlay: NSObject {
 
 // MARK: - Zoom Engine
 
-class ZoomEngine: NSObject, ObservableObject {
+class ZoomEngine: NSObject, ObservableObject, UIGestureRecognizerDelegate {
     enum Method: String {
         case engineHook = "Engine"
         case objcHook = "ObjC"
-        case jsHook = "JS Canvas"
         case displayZoom = "Display"
     }
 
@@ -466,16 +465,14 @@ class ZoomEngine: NSObject, ObservableObject {
     private weak var gameWindow: UIWindow?
     private var gameView: UIView?
     var gameViewForDump: UIView? { gameView }
-    private var originalFrame: CGRect = .zero
 
     var jsBridge: GameJSBridge?
     private var engineSetScale: ((Float) -> Void)?
-    private var displayLink: CADisplayLink?
-    private var zoomEnforceTimer: Timer?
+    private var enforceLink: CADisplayLink?
+    private var pinchBaseZoom: CGFloat = 1.0
 
     deinit {
-        displayLink?.invalidate()
-        zoomEnforceTimer?.invalidate()
+        enforceLink?.invalidate()
     }
 
     func setup(window: UIWindow) {
@@ -488,7 +485,6 @@ class ZoomEngine: NSObject, ObservableObject {
             gameView = window.rootViewController?.view
         }
         if let gv = gameView {
-            originalFrame = gv.frame
             let viewName = String(describing: type(of: gv))
             debugInfo = viewName
             let nativeHints = ["CCGL", "CCMetal", "CCEAGL", "GLView", "EAGLView",
@@ -506,30 +502,86 @@ class ZoomEngine: NSObject, ObservableObject {
             activeMethod = .displayZoom
             statusText = "Display zoom (\(debugInfo))"
         }
+
+        installGestures()
+        restoreZoom()
     }
+
+    // MARK: - Gestures
+
+    private func installGestures() {
+        guard let window = gameWindow else { return }
+
+        let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
+        pinch.delegate = self
+        window.addGestureRecognizer(pinch)
+
+        let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTapReset(_:)))
+        doubleTap.numberOfTapsRequired = 2
+        doubleTap.numberOfTouchesRequired = 2
+        doubleTap.delegate = self
+        window.addGestureRecognizer(doubleTap)
+    }
+
+    @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
+        switch gesture.state {
+        case .began:
+            pinchBaseZoom = currentZoom
+        case .changed:
+            let raw = pinchBaseZoom * gesture.scale
+            setZoom(min(max(raw, 0.3), 3.0))
+        default:
+            break
+        }
+    }
+
+    @objc private func handleDoubleTapReset(_ gesture: UITapGestureRecognizer) {
+        reset()
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        true
+    }
+
+    // MARK: - Zoom Control
 
     func setZoom(_ factor: CGFloat) {
         currentZoom = factor
-        zoomEnforceTimer?.invalidate()
-        zoomEnforceTimer = nil
+        persistZoom()
 
         if let hook = engineSetScale {
             hook(Float(factor))
-            if abs(factor - 1.0) > 0.01 {
-                zoomEnforceTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-                    guard let self = self, let hook = self.engineSetScale else { return }
-                    hook(Float(self.currentZoom))
-                }
-            }
+            startEnforcement()
         } else {
             applyDisplayZoom(factor)
         }
     }
 
     func reset() {
-        zoomEnforceTimer?.invalidate()
-        zoomEnforceTimer = nil
         setZoom(1.0)
+    }
+
+    // MARK: - Engine Enforcement (CADisplayLink — 60fps)
+
+    private func startEnforcement() {
+        enforceLink?.invalidate()
+        enforceLink = nil
+
+        if abs(currentZoom - 1.0) < 0.01 { return }
+
+        let link = CADisplayLink(target: self, selector: #selector(enforceFrame))
+        link.add(to: .main, forMode: .common)
+        enforceLink = link
+    }
+
+    @objc private func enforceFrame() {
+        guard let hook = engineSetScale else {
+            enforceLink?.invalidate()
+            enforceLink = nil
+            return
+        }
+        hook(Float(currentZoom))
     }
 
     // MARK: - C++ dlsym
@@ -632,34 +684,30 @@ class ZoomEngine: NSObject, ObservableObject {
         return false
     }
 
-    // MARK: - Display zoom (fallback)
+    // MARK: - Display Zoom (fallback)
 
     private func applyDisplayZoom(_ factor: CGFloat) {
         guard let view = gameView else { return }
-
-        displayLink?.invalidate()
-        displayLink = nil
+        enforceLink?.invalidate()
+        enforceLink = nil
 
         if abs(factor - 1.0) < 0.01 {
             view.transform = .identity
-            return
+        } else {
+            view.transform = CGAffineTransform(scaleX: factor, y: factor)
         }
-
-        view.transform = CGAffineTransform(scaleX: factor, y: factor)
-
-        let link = CADisplayLink(target: self, selector: #selector(displayLinkFired))
-        link.add(to: .main, forMode: .common)
-        displayLink = link
     }
 
-    @objc private func displayLinkFired() {
-        guard let view = gameView else { return }
-        if abs(currentZoom - 1.0) < 0.01 {
-            view.transform = .identity
-            displayLink?.invalidate()
-            displayLink = nil
-        } else {
-            view.transform = CGAffineTransform(scaleX: currentZoom, y: currentZoom)
+    // MARK: - Persistence
+
+    private func persistZoom() {
+        UserDefaults.standard.set(Double(currentZoom), forKey: "XRD_zoomLevel")
+    }
+
+    private func restoreZoom() {
+        let saved = UserDefaults.standard.double(forKey: "XRD_zoomLevel")
+        if saved > 0.1 && abs(saved - 1.0) > 0.05 {
+            setZoom(CGFloat(saved))
         }
     }
 

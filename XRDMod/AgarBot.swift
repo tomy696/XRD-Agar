@@ -1,5 +1,4 @@
 import Foundation
-import Network
 
 protocol AgarBotDelegate: AnyObject {
     func bot(_ bot: AgarBot, didUpdateState state: AgarBot.State)
@@ -8,7 +7,7 @@ protocol AgarBotDelegate: AnyObject {
     func botDidDisconnect(_ bot: AgarBot)
 }
 
-class AgarBot: NSObject, Identifiable {
+class AgarBot: NSObject, Identifiable, URLSessionWebSocketDelegate {
     let id = UUID()
     let name: String
     let serverIP: String
@@ -39,7 +38,8 @@ class AgarBot: NSObject, Identifiable {
         }
     }
 
-    private var nwConnection: NWConnection?
+    private var webSocketTask: URLSessionWebSocketTask?
+    private var urlSession: URLSession?
 
     private var targetPosition: (x: Double, y: Double)?
     private var ownIDs: [UInt32] = []
@@ -71,9 +71,7 @@ class AgarBot: NSObject, Identifiable {
         cleanup()
     }
 
-    // MARK: - TLS hostname for SNI
-
-    private var tlsHostname: String {
+    private var connectHost: String {
         if !serverHostname.isEmpty {
             var sin = sockaddr_in()
             var sin6 = sockaddr_in6()
@@ -86,7 +84,7 @@ class AgarBot: NSObject, Identifiable {
         return "eu-west-3.mobile-live-v26.agario.miniclippt.com"
     }
 
-    // MARK: - Connection (NWConnection — direct IP with proper TLS SNI)
+    // MARK: - Connection
 
     func connect() {
         state = .connecting
@@ -101,141 +99,141 @@ class AgarBot: NSObject, Identifiable {
         triedTLS = false
         triedPlain = false
 
-        connectWithTLS(serverPort == 443)
+        connectWebSocket(useTLS: true)
     }
 
     private var triedTLS = false
     private var triedPlain = false
 
-    private func connectWithTLS(_ useTLS: Bool) {
+    private func connectWebSocket(useTLS: Bool) {
         guard !cancelled else { return }
 
         if useTLS { triedTLS = true } else { triedPlain = true }
         connMode = useTLS ? "wss" : "ws"
 
-        guard let port = NWEndpoint.Port(rawValue: UInt16(serverPort)) else {
-            AgarBot.log("[\(name)] invalid port: \(serverPort)")
-            lastError = "invalid port"
+        let scheme = useTLS ? "wss" : "ws"
+        let host = connectHost
+
+        guard let url = URL(string: "\(scheme)://\(host):\(serverPort)") else {
+            AgarBot.log("[\(name)] invalid URL")
+            lastError = "invalid URL"
             state = .disconnected
             return
         }
 
-        let host = NWEndpoint.Host(serverIP)
-        let sni = tlsHostname
+        AgarBot.log("[\(name)] connecting \(url.absoluteString)")
 
-        AgarBot.log("[\(name)] connecting \(connMode)://\(serverIP):\(serverPort) sni=\(sni)")
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 12
+        config.timeoutIntervalForResource = 30
+        urlSession = URLSession(configuration: config, delegate: self, delegateQueue: .main)
 
-        let wsOptions = NWProtocolWebSocket.Options()
-        wsOptions.autoReplyPing = true
-        wsOptions.setAdditionalHeaders([("Host", sni)])
+        var request = URLRequest(url: url)
+        request.setValue("https://agar.io", forHTTPHeaderField: "Origin")
+        let task = urlSession!.webSocketTask(with: request)
+        self.webSocketTask = task
+        task.resume()
 
-        let params: NWParameters
-        if useTLS {
-            let tlsOpts = NWProtocolTLS.Options()
-            let secOpts = tlsOpts.securityProtocolOptions
-            sec_protocol_options_set_tls_server_name(secOpts, sni)
-            sec_protocol_options_set_verify_block(secOpts, { _, _, complete in
-                complete(true)
-            }, .main)
-            params = NWParameters(tls: tlsOpts)
-        } else {
-            params = NWParameters.tcp
-        }
+        receiveLoop()
 
-        params.defaultProtocolStack.applicationProtocols.insert(wsOptions, at: 0)
-
-        let connection = NWConnection(host: host, port: port, using: params)
-        self.nwConnection = connection
-
-        connection.stateUpdateHandler = { [weak self] newState in
-            guard let self = self, !self.cancelled else { return }
-            switch newState {
-            case .ready:
-                AgarBot.log("[\(self.name)] \(self.connMode) connected to \(self.serverIP):\(self.serverPort)")
-                self.state = .connected
-                self.sendGameHandshake()
-                self.receiveLoop()
-            case .failed(let error):
-                AgarBot.log("[\(self.name)] \(self.connMode) failed: \(error)")
-                self.nwConnection?.cancel()
-                self.nwConnection = nil
-                let canFallback = useTLS ? !self.triedPlain : !self.triedTLS
-                if canFallback {
-                    AgarBot.log("[\(self.name)] trying \(useTLS ? "ws" : "wss"):// fallback")
-                    self.connectWithTLS(!useTLS)
-                } else {
-                    self.lastError = error.localizedDescription
-                    self.disconnect()
-                }
-            case .waiting(let error):
-                AgarBot.log("[\(self.name)] waiting: \(error)")
-                self.nwConnection?.cancel()
-                self.nwConnection = nil
-                let canFallback = useTLS ? !self.triedPlain : !self.triedTLS
-                if canFallback {
-                    AgarBot.log("[\(self.name)] waiting, trying \(useTLS ? "ws" : "wss")://")
-                    self.connectWithTLS(!useTLS)
-                } else {
-                    self.lastError = error.localizedDescription
-                    self.disconnect()
-                }
-            default:
-                break
-            }
-        }
-
-        connection.start(queue: .main)
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 8.0) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10.0) { [weak self] in
             guard let self = self, !self.cancelled, self.state == .connecting else { return }
-            self.nwConnection?.cancel()
-            self.nwConnection = nil
+            AgarBot.log("[\(self.name)] \(self.connMode) timeout")
+            self.webSocketTask?.cancel(with: .goingAway, reason: nil)
+            self.webSocketTask = nil
+            self.urlSession?.invalidateAndCancel()
+            self.urlSession = nil
             let canFallback = useTLS ? !self.triedPlain : !self.triedTLS
             if canFallback {
-                AgarBot.log("[\(self.name)] \(self.connMode) timeout, trying \(useTLS ? "ws" : "wss")://")
-                self.connectWithTLS(!useTLS)
+                AgarBot.log("[\(self.name)] trying \(useTLS ? "ws" : "wss")://")
+                self.connectWebSocket(useTLS: !useTLS)
             } else {
                 self.lastError = "connection timeout"
                 self.disconnect()
             }
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 10.0) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 14.0) { [weak self] in
             guard let self = self, !self.cancelled else { return }
             if self.state == .connected && !self.handshakeComplete {
-                AgarBot.log("[\(self.name)] no F1 after 10s — forcing spawn")
+                AgarBot.log("[\(self.name)] no F1 after 14s — forcing spawn")
                 self.spawn()
             }
         }
     }
 
-    private func receiveLoop() {
-        nwConnection?.receiveMessage { [weak self] content, context, isComplete, error in
-            guard let self = self, !self.cancelled else { return }
+    // MARK: - URLSessionWebSocketDelegate
 
-            if let error = error {
-                AgarBot.log("[\(self.name)] recv error: \(error)")
+    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol proto: String?) {
+        guard !cancelled else { return }
+        AgarBot.log("[\(name)] \(connMode) connected to \(connectHost):\(serverPort)")
+        state = .connected
+        sendGameHandshake()
+    }
+
+    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
+        guard !cancelled else { return }
+        AgarBot.log("[\(name)] WS closed code=\(closeCode.rawValue) pkts=\(serverPacketCount)")
+        lastError = "WS closed code=\(closeCode.rawValue) pkts=\(serverPacketCount)"
+        disconnect()
+    }
+
+    func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+           let trust = challenge.protectionSpace.serverTrust {
+            completionHandler(.useCredential, URLCredential(trust: trust))
+        } else {
+            completionHandler(.performDefaultHandling, nil)
+        }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: (any Error)?) {
+        guard !cancelled else { return }
+        guard let error = error else { return }
+        let nsError = error as NSError
+        if nsError.code == NSURLErrorCancelled { return }
+
+        AgarBot.log("[\(name)] \(connMode) error: \(error.localizedDescription)")
+        webSocketTask = nil
+        urlSession?.invalidateAndCancel()
+        urlSession = nil
+
+        let usedTLS = connMode == "wss"
+        let canFallback = usedTLS ? !triedPlain : !triedTLS
+        if canFallback && state == .connecting {
+            AgarBot.log("[\(name)] trying \(usedTLS ? "ws" : "wss")://")
+            connectWebSocket(useTLS: !usedTLS)
+        } else if state != .disconnected {
+            lastError = error.localizedDescription
+            disconnect()
+        }
+    }
+
+    private func receiveLoop() {
+        webSocketTask?.receive { [weak self] result in
+            guard let self = self, !self.cancelled else { return }
+            switch result {
+            case .success(let message):
+                switch message {
+                case .data(let data):
+                    self.handlePacket(data)
+                case .string(let str):
+                    if let data = str.data(using: .utf8) {
+                        self.handlePacket(data)
+                    }
+                @unknown default:
+                    break
+                }
+                self.receiveLoop()
+            case .failure(let error):
+                let nsError = error as NSError
+                if nsError.code == NSURLErrorCancelled { return }
                 if !self.cancelled {
+                    AgarBot.log("[\(self.name)] recv error: \(error.localizedDescription)")
                     self.lastError = error.localizedDescription
                     self.disconnect()
                 }
-                return
             }
-
-            if let wsMetadata = context?.protocolMetadata(definition: NWProtocolWebSocket.definition) as? NWProtocolWebSocket.Metadata,
-               wsMetadata.opcode == .close {
-                AgarBot.log("[\(self.name)] WS closed by server pkts=\(self.serverPacketCount)")
-                if !self.cancelled {
-                    self.lastError = "WS closed pkts=\(self.serverPacketCount)"
-                    self.disconnect()
-                }
-                return
-            }
-
-            if let data = content, !data.isEmpty {
-                self.handlePacket(data)
-            }
-            self.receiveLoop()
         }
     }
 
@@ -257,7 +255,7 @@ class AgarBot: NSObject, Identifiable {
     }
 
     private func gameSend(_ data: Data) {
-        guard !cancelled, let connection = nwConnection else { return }
+        guard !cancelled, let task = webSocketTask else { return }
         let sendData: Data
         if handshakeComplete {
             sendData = AgarProtocol.xorWithKey(data, key: encryptionKey)
@@ -265,13 +263,11 @@ class AgarBot: NSObject, Identifiable {
         } else {
             sendData = data
         }
-        let metadata = NWProtocolWebSocket.Metadata(opcode: .binary)
-        let context = NWConnection.ContentContext(identifier: "ws", metadata: [metadata])
-        connection.send(content: sendData, contentContext: context, isComplete: true, completion: .contentProcessed { [weak self] error in
+        task.send(.data(sendData)) { [weak self] error in
             if let error = error, let self = self, !self.cancelled {
                 AgarBot.log("[\(self.name)] send error: \(error)")
             }
-        })
+        }
     }
 
     // MARK: - Public API
@@ -304,7 +300,17 @@ class AgarBot: NSObject, Identifiable {
     private func handlePacket(_ data: Data) {
         serverPacketCount += 1
 
-        let decoded = AgarProtocol.xorWithKey(data, key: decryptionKey)
+        if serverPacketCount <= 3 {
+            let rawHex = data.prefix(30).map { String(format: "%02x", $0) }.joined(separator: " ")
+            AgarBot.log("[\(name)] raw#\(serverPacketCount) len=\(data.count) [\(rawHex)]")
+        }
+
+        let decoded: Data
+        if handshakeComplete {
+            decoded = AgarProtocol.xorWithKey(data, key: decryptionKey)
+        } else {
+            decoded = data
+        }
 
         guard let packet = AgarProtocol.parsePacket(decoded) else {
             if serverPacketCount <= 10 {
@@ -320,11 +326,26 @@ class AgarBot: NSObject, Identifiable {
             serverVersion = ver
             let versionInt = AgarProtocol.versionStringToInt(AgarProtocol.clientVersion)
             decryptionKey = mk ^ versionInt
-            let host = tlsHostname
+            let host = connectHost
             encryptionKey = AgarProtocol.murmur2("\(host)\(ver)", seed: 255)
             handshakeComplete = true
             AgarBot.log("[\(name)] F1 mk=\(mk) dk=\(decryptionKey) ek=\(encryptionKey) ver=\"\(ver)\" host=\(host)")
             spawn()
+
+        case .outdatedVersion:
+            AgarBot.log("[\(name)] OUTDATED 0x80 — client version \(AgarProtocol.clientVersion) rejected")
+            lastError = "client version outdated"
+            disconnect()
+
+        case .protocolError:
+            AgarBot.log("[\(name)] PROTO_ERROR 0x81 — protocol version \(AgarProtocol.protocolVersion) rejected")
+            lastError = "protocol version rejected"
+            disconnect()
+
+        case .captchaRequest:
+            AgarBot.log("[\(name)] CAPTCHA 0x55 — server wants reCAPTCHA")
+            lastError = "captcha requested"
+            disconnect()
 
         case .ack:
             AgarBot.log("[\(name)] ACK — spawning")
@@ -368,17 +389,16 @@ class AgarBot: NSObject, Identifiable {
         case .worldBorder(let border):
             worldBorder = border
             AgarBot.log("[\(name)] world border")
-            if state == .connecting || state == .connected {
-                state = .connected
+            if !isAlive && (state == .connecting || state == .connected || state == .spawning) {
                 spawn()
             }
 
         case .clearAll:
             cells.removeAll()
 
-        case .clearCell(let id):
-            cells.removeValue(forKey: id)
-            ownIDs.removeAll { $0 == id }
+        case .clearCell(let cid):
+            cells.removeValue(forKey: cid)
+            ownIDs.removeAll { $0 == cid }
             if isAlive && ownIDs.isEmpty {
                 isAlive = false
                 state = .dead
@@ -400,8 +420,7 @@ class AgarBot: NSObject, Identifiable {
                 if abs(minX) < 50000 && abs(maxX) < 50000 && maxX > minX && maxY > minY {
                     worldBorder = WorldBorder(minX: minX, minY: minY, maxX: maxX, maxY: maxY)
                     AgarBot.log("[\(name)] heuristic world border \(worldBorder)")
-                    if state == .connecting || state == .connected {
-                        state = .connected
+                    if !isAlive && (state == .connecting || state == .connected || state == .spawning) {
                         spawn()
                     }
                 }
@@ -488,7 +507,9 @@ class AgarBot: NSObject, Identifiable {
     private func cleanup() {
         moveTimer?.invalidate()
         moveTimer = nil
-        nwConnection?.cancel()
-        nwConnection = nil
+        webSocketTask?.cancel(with: .goingAway, reason: nil)
+        webSocketTask = nil
+        urlSession?.invalidateAndCancel()
+        urlSession = nil
     }
 }

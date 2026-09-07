@@ -2,7 +2,7 @@ import Foundation
 
 class AgarProtocol {
 
-    static let protocolVersion: UInt32 = 22
+    static let protocolVersion: UInt32 = 23
     static let clientVersion: String = "26.6.0"
 
     // MARK: - Client → Server Packets
@@ -27,6 +27,7 @@ class AgarProtocol {
         for byte in name.utf8 {
             data.append(byte)
         }
+        data.append(0)
         return data
     }
 
@@ -178,6 +179,10 @@ class AgarProtocol {
         switch firstByte {
         case 0xF1:
             return parseF1(data)
+        case 0x80:
+            return .outdatedVersion
+        case 0x81:
+            return .protocolError
         case 0xFF:
             if data.count > 5 {
                 let compressed = Data(data[5...])
@@ -194,6 +199,8 @@ class AgarProtocol {
         reader.skip(1)
 
         switch firstByte {
+        case 0x55:
+            return .captchaRequest
         case 0x6B:
             return .ack
         case 0x66:
@@ -367,6 +374,9 @@ enum ServerPacket {
     case clearCell(UInt32)
     case leaderboard([(id: UInt32, name: String)])
     case chatMessage(name: String, message: String, color: UInt32)
+    case outdatedVersion
+    case protocolError
+    case captchaRequest
     case unknown(opcode: UInt8, data: Data)
 }
 
