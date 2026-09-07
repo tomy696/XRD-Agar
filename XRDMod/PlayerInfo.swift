@@ -26,8 +26,8 @@ struct PlayerInfo: Identifiable, Hashable {
 
 struct CellUpdate {
     var id: UInt32
-    var x: Int16
-    var y: Int16
+    var x: Int32
+    var y: Int32
     var size: Int16
     var color: UInt32
     var flags: UInt8

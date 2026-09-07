@@ -49,8 +49,13 @@ class AgarBot: NSObject, Identifiable {
     private var isAlive: Bool = false
     private var respawnCount: Int = 0
     private var cancelled = false
-    private var xorKey: [UInt8]?
     private(set) var serverPacketCount: Int = 0
+
+    private var encryptionKey: UInt32 = 0
+    private var decryptionKey: UInt32 = 0
+    private var movementKey: UInt32 = 0
+    private var serverVersion: String = ""
+    private var handshakeComplete = false
 
     init(name: String, serverIP: String, serverPort: Int, serverHostname: String, serverToken: String, action: BotAction) {
         self.name = name
@@ -87,13 +92,15 @@ class AgarBot: NSObject, Identifiable {
         state = .connecting
         lastError = ""
         cancelled = false
-        xorKey = nil
+        encryptionKey = 0
+        decryptionKey = 0
+        movementKey = 0
+        serverVersion = ""
+        handshakeComplete = false
         serverPacketCount = 0
         triedTLS = false
         triedPlain = false
 
-        // Port 443 = standard TLS, try wss first
-        // Dynamic ports (20982 etc) = likely plain WS, try ws first
         connectWithTLS(serverPort == 443)
     }
 
@@ -193,10 +200,10 @@ class AgarBot: NSObject, Identifiable {
             }
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10.0) { [weak self] in
             guard let self = self, !self.cancelled else { return }
-            if self.state == .connected {
-                AgarBot.log("[\(self.name)] spawn timeout — forcing spawn")
+            if self.state == .connected && !self.handshakeComplete {
+                AgarBot.log("[\(self.name)] no F1 after 10s — forcing spawn")
                 self.spawn()
             }
         }
@@ -236,12 +243,13 @@ class AgarBot: NSObject, Identifiable {
 
     private func sendGameHandshake() {
         let hs = AgarProtocol.handshakePacket()
-        let ck = AgarProtocol.connectionKeyPacket()
+        let vi = AgarProtocol.versionIntPacket()
         gameSend(hs)
-        gameSend(ck)
+        gameSend(vi)
         let hsHex = hs.map { String(format: "%02x", $0) }.joined(separator: " ")
-        let ckHex = ck.map { String(format: "%02x", $0) }.joined(separator: " ")
-        AgarBot.log("[\(name)] handshake=[\(hsHex)] key=[\(ckHex)]")
+        let viHex = vi.map { String(format: "%02x", $0) }.joined(separator: " ")
+        let vInt = AgarProtocol.versionStringToInt(AgarProtocol.clientVersion)
+        AgarBot.log("[\(name)] handshake=[\(hsHex)] verInt=[\(viHex)] (\(vInt))")
         if !serverToken.isEmpty {
             gameSend(AgarProtocol.facebookTokenPacket(token: serverToken))
             AgarBot.log("[\(name)] token sent (\(serverToken.count) chars)")
@@ -250,9 +258,16 @@ class AgarBot: NSObject, Identifiable {
 
     private func gameSend(_ data: Data) {
         guard !cancelled, let connection = nwConnection else { return }
+        let sendData: Data
+        if handshakeComplete {
+            sendData = AgarProtocol.xorWithKey(data, key: encryptionKey)
+            encryptionKey = AgarProtocol.rotateKey(encryptionKey)
+        } else {
+            sendData = data
+        }
         let metadata = NWProtocolWebSocket.Metadata(opcode: .binary)
         let context = NWConnection.ContentContext(identifier: "ws", metadata: [metadata])
-        connection.send(content: data, contentContext: context, isComplete: true, completion: .contentProcessed { [weak self] error in
+        connection.send(content: sendData, contentContext: context, isComplete: true, completion: .contentProcessed { [weak self] error in
             if let error = error, let self = self, !self.cancelled {
                 AgarBot.log("[\(self.name)] send error: \(error)")
             }
@@ -289,21 +304,7 @@ class AgarBot: NSObject, Identifiable {
     private func handlePacket(_ data: Data) {
         serverPacketCount += 1
 
-        if data.first == 0xF1 && xorKey == nil {
-            if data.count >= 5 {
-                xorKey = [data[1], data[2], data[3], data[4]]
-                let ver = data.count > 5 ? (String(data: data[5...], encoding: .utf8)?.replacingOccurrences(of: "\0", with: "") ?? "") : ""
-                AgarBot.log("[\(name)] VERSION \"\(ver)\" xorKey=[\(xorKey!.map { String(format: "%02x", $0) }.joined())]")
-            }
-            return
-        }
-
-        let decoded: Data
-        if let key = xorKey {
-            decoded = AgarProtocol.xorApply(data, key: key)
-        } else {
-            decoded = data
-        }
+        let decoded = AgarProtocol.xorWithKey(data, key: decryptionKey)
 
         guard let packet = AgarProtocol.parsePacket(decoded) else {
             if serverPacketCount <= 10 {
@@ -314,9 +315,16 @@ class AgarBot: NSObject, Identifiable {
         }
 
         switch packet {
-        case .version(let key, let ver):
-            xorKey = key
-            AgarBot.log("[\(name)] VERSION(parsed) \"\(ver)\"")
+        case .version(let mk, let ver):
+            movementKey = mk
+            serverVersion = ver
+            let versionInt = AgarProtocol.versionStringToInt(AgarProtocol.clientVersion)
+            decryptionKey = mk ^ versionInt
+            let host = tlsHostname
+            encryptionKey = AgarProtocol.murmur2("\(host)\(ver)", seed: 255)
+            handshakeComplete = true
+            AgarBot.log("[\(name)] F1 mk=\(mk) dk=\(decryptionKey) ek=\(encryptionKey) ver=\"\(ver)\" host=\(host)")
+            spawn()
 
         case .ack:
             AgarBot.log("[\(name)] ACK — spawning")
@@ -344,18 +352,22 @@ class AgarBot: NSObject, Identifiable {
             delegate?.bot(self, didReceiveWorldUpdate: updates)
 
         case .ownIDs(let ids):
-            ownIDs = ids
-            if !ids.isEmpty {
+            for newId in ids {
+                if !ownIDs.contains(newId) {
+                    ownIDs.append(newId)
+                }
+            }
+            if !ownIDs.isEmpty && !isAlive {
                 isAlive = true
                 state = .alive
-                AgarBot.log("[\(name)] ALIVE ids=\(ids)")
-                delegate?.bot(self, didSpawnWithIDs: ids)
+                AgarBot.log("[\(name)] ALIVE ids=\(ownIDs)")
+                delegate?.bot(self, didSpawnWithIDs: ownIDs)
                 startMovementLoop()
             }
 
         case .worldBorder(let border):
             worldBorder = border
-            AgarBot.log("[\(name)] world border, spawning")
+            AgarBot.log("[\(name)] world border")
             if state == .connecting || state == .connected {
                 state = .connected
                 spawn()
@@ -392,20 +404,6 @@ class AgarBot: NSObject, Identifiable {
                         state = .connected
                         spawn()
                     }
-                }
-            }
-            if raw.count >= 5 && raw.count <= 33 && (raw.count - 1) % 4 == 0 {
-                let reader = BinaryReader(data: raw)
-                reader.skip(1)
-                var ids: [UInt32] = []
-                while reader.hasMore { ids.append(reader.readUInt32()) }
-                if !ids.isEmpty && ids.allSatisfy({ $0 > 0 && $0 < 0xFFFFFF }) {
-                    ownIDs = ids
-                    isAlive = true
-                    state = .alive
-                    AgarBot.log("[\(name)] heuristic ALIVE ids=\(ids)")
-                    delegate?.bot(self, didSpawnWithIDs: ids)
-                    startMovementLoop()
                 }
             }
 
@@ -449,17 +447,17 @@ class AgarBot: NSObject, Identifiable {
         case .feedEverywhere:
             let rx = Double.random(in: worldBorder.minX...worldBorder.maxX)
             let ry = Double.random(in: worldBorder.minY...worldBorder.maxY)
-            gameSend(AgarProtocol.movePacket(x: rx, y: ry))
+            gameSend(AgarProtocol.movePacket(x: rx, y: ry, movementKey: movementKey))
             gameSend(AgarProtocol.ejectMassPacket())
         }
     }
 
     private func moveToTarget() {
         guard let t = targetPosition else {
-            gameSend(AgarProtocol.movePacket(x: worldBorder.centerX, y: worldBorder.centerY))
+            gameSend(AgarProtocol.movePacket(x: worldBorder.centerX, y: worldBorder.centerY, movementKey: movementKey))
             return
         }
-        gameSend(AgarProtocol.movePacket(x: t.x, y: t.y))
+        gameSend(AgarProtocol.movePacket(x: t.x, y: t.y, movementKey: movementKey))
     }
 
     private var ownPosition: (x: Double, y: Double)? {
