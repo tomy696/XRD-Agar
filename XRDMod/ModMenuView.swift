@@ -4,6 +4,7 @@ struct ModMenuView: View {
     @ObservedObject var settings: GameSettings
     @ObservedObject var botEngine: BotEngine
     @ObservedObject var zoomEngine: ZoomEngine
+    @ObservedObject var gameHooks: GameHooks
     @State private var activeTab: MenuTab = .bots
     @State private var showSaved = false
     @State private var manualServer: String = ""
@@ -12,6 +13,7 @@ struct ModMenuView: View {
 
     enum MenuTab: String, CaseIterable {
         case bots = "Bots"
+        case mods = "Mods"
         case zoom = "Zoom"
         case config = "Config"
     }
@@ -29,7 +31,7 @@ struct ModMenuView: View {
             tabContent
             statusBar
         }
-        .frame(width: 210, height: 300)
+        .frame(width: 230, height: 380)
         .background(
             RoundedRectangle(cornerRadius: 12)
                 .fill(Color.black.opacity(0.92))
@@ -91,12 +93,143 @@ struct ModMenuView: View {
         ScrollView(.vertical, showsIndicators: false) {
             switch activeTab {
             case .bots: BotConfigPanel(settings: settings, botEngine: botEngine)
+            case .mods: modsTab
             case .zoom: zoomTab
             case .config: configTab
             }
         }
         .padding(.horizontal, 8)
         .padding(.top, 4)
+    }
+
+    // MARK: - Mods Tab
+
+    private var modsTab: some View {
+        VStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
+                sectionHeader("GAMEPLAY")
+                modToggle("Unlock FPS (120)", isOn: Binding(
+                    get: { GameHooks.unlockFPS },
+                    set: { GameHooks.unlockFPS = $0; gameHooks.applyFPSToExisting(); gameHooks.saveToggles() }
+                ))
+                modToggle("Auto Respawn", isOn: Binding(
+                    get: { GameHooks.autoRespawn },
+                    set: { GameHooks.autoRespawn = $0; gameHooks.saveToggles() }
+                ))
+                modToggle("Show Mass", isOn: Binding(
+                    get: { GameHooks.showMass },
+                    set: { GameHooks.showMass = $0; gameHooks.saveToggles() }
+                ))
+            }
+            .sectionStyle()
+
+            VStack(alignment: .leading, spacing: 6) {
+                sectionHeader("VISUALS")
+                modToggle("Hide Grid", isOn: Binding(
+                    get: { GameHooks.hideGrid },
+                    set: { GameHooks.hideGrid = $0; gameHooks.saveToggles() }
+                ))
+                modToggle("Hide Borders", isOn: Binding(
+                    get: { GameHooks.hideBorder },
+                    set: { GameHooks.hideBorder = $0; gameHooks.saveToggles() }
+                ))
+                modToggle("No Skins", isOn: Binding(
+                    get: { GameHooks.noSkins },
+                    set: { GameHooks.noSkins = $0; gameHooks.saveToggles() }
+                ))
+                modToggle("No Animations", isOn: Binding(
+                    get: { GameHooks.disableAnimations },
+                    set: { GameHooks.disableAnimations = $0; gameHooks.saveToggles() }
+                ))
+            }
+            .sectionStyle()
+
+            VStack(alignment: .leading, spacing: 6) {
+                sectionHeader("UNLOCK")
+                modToggle("All Skins", isOn: Binding(
+                    get: { GameHooks.unlockSkins },
+                    set: { GameHooks.unlockSkins = $0; gameHooks.saveToggles() }
+                ))
+                modToggle("All Emojis", isOn: Binding(
+                    get: { GameHooks.unlockEmojis },
+                    set: { GameHooks.unlockEmojis = $0; gameHooks.saveToggles() }
+                ))
+            }
+            .sectionStyle()
+
+            VStack(alignment: .leading, spacing: 6) {
+                sectionHeader("MACROS")
+                HStack(spacing: 6) {
+                    Button(action: {
+                        GameHooks.feedMacroActive.toggle()
+                        if GameHooks.feedMacroActive { gameHooks.startFeedMacro() }
+                    }) {
+                        Text(GameHooks.feedMacroActive ? "FEED ON" : "FEED")
+                            .font(.system(size: 9, weight: .black, design: .monospaced))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .background(GameHooks.feedMacroActive ? Color.green.opacity(0.7) : xrdPurple.opacity(0.6))
+                            .cornerRadius(6)
+                    }
+                    Button(action: {
+                        gameHooks.startSplitMacro(count: 16)
+                    }) {
+                        Text("SPLIT x16")
+                            .font(.system(size: 9, weight: .black, design: .monospaced))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .background(xrdPurple.opacity(0.6))
+                            .cornerRadius(6)
+                    }
+                }
+                Button(action: { gameHooks.stopMacros() }) {
+                    Text("STOP MACROS")
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .foregroundColor(.red)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                        .background(Color.red.opacity(0.1))
+                        .cornerRadius(6)
+                }
+            }
+            .sectionStyle()
+
+            VStack(alignment: .leading, spacing: 4) {
+                sectionHeader("HOOKS STATUS")
+                if gameHooks.hookedMethods.isEmpty {
+                    Text("Aucun hook actif")
+                        .font(.system(size: 8, design: .monospaced))
+                        .foregroundColor(.orange.opacity(0.7))
+                } else {
+                    ForEach(gameHooks.hookedMethods, id: \.self) { method in
+                        HStack(spacing: 4) {
+                            Circle().fill(Color.green).frame(width: 4, height: 4)
+                            Text(method)
+                                .font(.system(size: 8, design: .monospaced))
+                                .foregroundColor(.green.opacity(0.8))
+                        }
+                    }
+                }
+            }
+            .sectionStyle()
+
+            Spacer(minLength: 8)
+        }
+    }
+
+    private func modToggle(_ label: String, isOn: Binding<Bool>) -> some View {
+        HStack {
+            Text(label)
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .foregroundColor(.white)
+            Spacer()
+            Toggle("", isOn: isOn)
+                .labelsHidden()
+                .scaleEffect(0.7)
+                .tint(xrdPurple)
+        }
     }
 
     // MARK: - Zoom Tab
@@ -167,7 +300,14 @@ struct ModMenuView: View {
             .sectionStyle()
 
             VStack(alignment: .leading, spacing: 4) {
-                if zoomEngine.activeMethod == .engineHook || zoomEngine.activeMethod == .objcHook {
+                if zoomEngine.activeMethod == .gameHook {
+                    HStack(spacing: 4) {
+                        Circle().fill(Color.green).frame(width: 5, height: 5)
+                        Text("Game hook actif")
+                            .font(.system(size: 8, design: .monospaced))
+                            .foregroundColor(.green.opacity(0.8))
+                    }
+                } else if zoomEngine.activeMethod == .engineHook || zoomEngine.activeMethod == .objcHook {
                     HStack(spacing: 4) {
                         Circle().fill(Color.green).frame(width: 5, height: 5)
                         Text("Engine hook actif")
@@ -282,7 +422,7 @@ struct ModMenuView: View {
 
     private var configVersionSection: some View {
         VStack(alignment: .leading, spacing: 3) {
-            infoRow("Version", "2.0")
+            infoRow("Version", "3.1")
             infoRow("Mod", "XRD Agar.io")
         }
         .sectionStyle()
@@ -437,7 +577,7 @@ struct ModMenuView: View {
                 .foregroundColor(.gray)
                 .lineLimit(1)
             Spacer()
-            Text("v2.0")
+            Text("v3.0")
                 .font(.system(size: 7, design: .monospaced))
                 .foregroundColor(.gray.opacity(0.4))
         }

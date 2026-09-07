@@ -10,6 +10,7 @@ class XRDOverlay: NSObject {
     let botEngine = BotEngine()
     let zoomEngine = ZoomEngine()
     let jsBridge = GameJSBridge()
+    let gameHooks = GameHooks.shared
 
     private weak var gameWindow: UIWindow?
     private var container: XRDPassthroughView?
@@ -41,6 +42,8 @@ class XRDOverlay: NSObject {
             self.jsBridge.setup(in: mainWindow)
             self.zoomEngine.jsBridge = self.jsBridge
             self.zoomEngine.setup(window: mainWindow)
+            self.gameHooks.loadToggles()
+            self.gameHooks.install(window: mainWindow)
             self.readGameConfig()
         }
 
@@ -132,11 +135,11 @@ class XRDOverlay: NSObject {
     private func showMenu() {
         ensureContainer()
         guard let c = container else { return }
-        let menu = ModMenuView(settings: settings, botEngine: botEngine, zoomEngine: zoomEngine)
+        let menu = ModMenuView(settings: settings, botEngine: botEngine, zoomEngine: zoomEngine, gameHooks: gameHooks)
         let hosting = UIHostingController(rootView: AnyView(menu))
         hosting.view.backgroundColor = .clear
-        let menuW: CGFloat = 220
-        let menuH: CGFloat = 310
+        let menuW: CGFloat = 230
+        let menuH: CGFloat = 380
         let x = c.bounds.width - menuW - 8
         let y: CGFloat = 85
         let finalFrame = CGRect(x: x, y: y, width: menuW, height: menuH)
@@ -326,6 +329,13 @@ class XRDOverlay: NSObject {
         for c in bsdConns.suffix(40) { L.append("  \(c)") }
 
         L.append("")
+        L.append("-- GAME HOOKS --")
+        L.append("Hooks: \(gameHooks.hookStatus)")
+        L.append("Methods: \(gameHooks.hookedMethods.joined(separator: ", "))")
+        L.append("FPS: \(GameHooks.unlockFPS) AutoResp: \(GameHooks.autoRespawn)")
+        L.append("Skins: \(GameHooks.unlockSkins) Emojis: \(GameHooks.unlockEmojis)")
+
+        L.append("")
         L.append("-- FEATURES --")
         L.append("Bots: running=\(botEngine.isRunning) alive=\(botEngine.totalAlive) spawned=\(botEngine.totalSpawned)")
         L.append("Bots.status: \(botEngine.statusMessage)")
@@ -372,7 +382,12 @@ class XRDOverlay: NSObject {
                           "CCScheduler", "CCActionManager", "CCTextureCache",
                           "CCApplication", "CCScene", "CCLayer", "CCNode",
                           "CCSprite", "CCLabelTTF", "CCMenu", "CCParticleSystem",
-                          "CCCamera", "CCRenderer"]
+                          "CCCamera", "CCRenderer",
+                          "BaseArenaView", "BaseArenaState",
+                          "ClassicArenaView", "ClassicArenaState",
+                          "OnlineClassicArenaState", "OnlineArenaState",
+                          "AgarCell", "PlayerAvatar", "AgarIoPromoManager",
+                          "MCCourier", "MTGAsyncSocket"]
         let found = candidates.filter { NSClassFromString($0) != nil }
         L.append("Found: \(found.joined(separator: ", "))")
 
@@ -451,10 +466,13 @@ class XRDOverlay: NSObject {
 
 class ZoomEngine: NSObject, ObservableObject, UIGestureRecognizerDelegate {
     enum Method: String {
+        case gameHook = "Game"
         case engineHook = "Engine"
         case objcHook = "ObjC"
         case displayZoom = "Display"
     }
+
+    static var zoomMultiplier: Float = 1.0
 
     @Published var currentZoom: CGFloat = 1.0
     @Published var activeMethod: Method = .displayZoom
@@ -470,6 +488,7 @@ class ZoomEngine: NSObject, ObservableObject, UIGestureRecognizerDelegate {
     private var engineSetScale: ((Float) -> Void)?
     private var enforceLink: CADisplayLink?
     private var pinchBaseZoom: CGFloat = 1.0
+    private var gameZoomHooked = false
 
     deinit {
         enforceLink?.invalidate()
@@ -492,7 +511,11 @@ class ZoomEngine: NSObject, ObservableObject, UIGestureRecognizerDelegate {
             isNativeGame = nativeHints.contains(where: { viewName.localizedCaseInsensitiveContains($0) })
         }
 
-        if tryCppHooks() {
+        if tryGameZoomHooks() {
+            activeMethod = .gameHook
+            gameZoomHooked = true
+            statusText = "Game zoom (\(debugInfo))"
+        } else if tryCppHooks() {
             activeMethod = .engineHook
             statusText = "C++ zoom (\(debugInfo))"
         } else if tryObjCHooks() {
@@ -544,12 +567,95 @@ class ZoomEngine: NSObject, ObservableObject, UIGestureRecognizerDelegate {
         true
     }
 
+    // MARK: - Game-specific zoom hooks (like BiteYT)
+
+    private func tryGameZoomHooks() -> Bool {
+        let arenaClasses = [
+            "BaseArenaState", "OnlineClassicArenaState",
+            "ClassicArenaState", "OnlineArenaState",
+            "BaseArenaView", "ClassicArenaView"
+        ]
+
+        var calcHooked = false
+        var scaleHooked = false
+
+        for className in arenaClasses {
+            guard let cls = NSClassFromString(className) else { continue }
+
+            if !calcHooked {
+                let sel = NSSelectorFromString("calculateZoom:cellAmount:")
+                if let method = class_getInstanceMethod(cls, sel) {
+                    let origIMP = method_getImplementation(method)
+                    let encoding = method_getTypeEncoding(method).map { String(cString: $0) } ?? ""
+                    let isFloat = encoding.hasPrefix("f")
+
+                    if isFloat {
+                        typealias Fn = @convention(c) (AnyObject, Selector, Float, Int32) -> Float
+                        let block: @convention(block) (AnyObject, Float, Int32) -> Float = { obj, zoom, cells in
+                            let orig = unsafeBitCast(origIMP, to: Fn.self)
+                            let result = orig(obj, sel, zoom, cells)
+                            return result * ZoomEngine.zoomMultiplier
+                        }
+                        method_setImplementation(method, imp_implementationWithBlock(block))
+                    } else {
+                        typealias Fn = @convention(c) (AnyObject, Selector, CGFloat, Int) -> CGFloat
+                        let block: @convention(block) (AnyObject, CGFloat, Int) -> CGFloat = { obj, zoom, cells in
+                            let orig = unsafeBitCast(origIMP, to: Fn.self)
+                            let result = orig(obj, sel, zoom, cells)
+                            return result * CGFloat(ZoomEngine.zoomMultiplier)
+                        }
+                        method_setImplementation(method, imp_implementationWithBlock(block))
+                    }
+                    debugInfo = "\(className).calcZoom"
+                    calcHooked = true
+                }
+            }
+
+            if !scaleHooked {
+                let sel = NSSelectorFromString("getScaleFactorForNumberOfCells:")
+                if let method = class_getInstanceMethod(cls, sel) {
+                    let origIMP = method_getImplementation(method)
+                    let encoding = method_getTypeEncoding(method).map { String(cString: $0) } ?? ""
+                    let isFloat = encoding.hasPrefix("f")
+
+                    if isFloat {
+                        typealias Fn = @convention(c) (AnyObject, Selector, Int32) -> Float
+                        let block: @convention(block) (AnyObject, Int32) -> Float = { obj, cells in
+                            let orig = unsafeBitCast(origIMP, to: Fn.self)
+                            let result = orig(obj, sel, cells)
+                            return result * ZoomEngine.zoomMultiplier
+                        }
+                        method_setImplementation(method, imp_implementationWithBlock(block))
+                    } else {
+                        typealias Fn = @convention(c) (AnyObject, Selector, Int) -> CGFloat
+                        let block: @convention(block) (AnyObject, Int) -> CGFloat = { obj, cells in
+                            let orig = unsafeBitCast(origIMP, to: Fn.self)
+                            let result = orig(obj, sel, cells)
+                            return result * CGFloat(ZoomEngine.zoomMultiplier)
+                        }
+                        method_setImplementation(method, imp_implementationWithBlock(block))
+                    }
+                    debugInfo += " +scaleFactor"
+                    scaleHooked = true
+                }
+            }
+
+            if calcHooked && scaleHooked { break }
+        }
+
+        return calcHooked || scaleHooked
+    }
+
     // MARK: - Zoom Control
 
     func setZoom(_ factor: CGFloat) {
         currentZoom = factor
+        ZoomEngine.zoomMultiplier = Float(factor)
         persistZoom()
 
+        if gameZoomHooked {
+            return
+        }
         if let hook = engineSetScale {
             hook(Float(factor))
             startEnforcement()
@@ -559,6 +665,7 @@ class ZoomEngine: NSObject, ObservableObject, UIGestureRecognizerDelegate {
     }
 
     func reset() {
+        ZoomEngine.zoomMultiplier = 1.0
         setZoom(1.0)
     }
 

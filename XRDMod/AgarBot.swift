@@ -73,6 +73,9 @@ class AgarBot: NSObject, Identifiable, URLSessionWebSocketDelegate {
 
     private var connectHost: String {
         if !serverHostname.isEmpty {
+            if serverHostname.contains("mobile-live") {
+                return "web-arenas-live-v25-0.agario.miniclippt.com"
+            }
             var sin = sockaddr_in()
             var sin6 = sockaddr_in6()
             let isIP = serverHostname.withCString { cs in
@@ -81,7 +84,7 @@ class AgarBot: NSObject, Identifiable, URLSessionWebSocketDelegate {
             }
             if !isIP { return serverHostname }
         }
-        return "eu-west-3.mobile-live-v26.agario.miniclippt.com"
+        return "web-arenas-live-v25-0.agario.miniclippt.com"
     }
 
     // MARK: - Connection

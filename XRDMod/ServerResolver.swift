@@ -2,6 +2,18 @@ import Foundation
 
 class ServerResolver {
 
+    private static let webServers = [
+        "web-arenas-live-v25-0.agario.miniclippt.com",
+        "web-arenas-live-v25-1.agario.miniclippt.com",
+        "web-arenas-live-v25-2.agario.miniclippt.com",
+        "web-arenas-live-v25-3.agario.miniclippt.com",
+        "web-arenas-live-v25-4.agario.miniclippt.com"
+    ]
+
+    private static let mobileToWebMap: [String: String] = [
+        "mobile-live-v26": "web-arenas-live-v25-0"
+    ]
+
     private static let gameRegions = [
         "eu-west-3.mobile-live-v26.agario.miniclippt.com",
         "us-east-1.mobile-live-v26.agario.miniclippt.com",
@@ -14,6 +26,13 @@ class ServerResolver {
         "eu-central-1.mobile-live-v26.agario.miniclippt.com",
         "ap-southeast-2.mobile-live-v26.agario.miniclippt.com"
     ]
+
+    private static func mobileToWeb(_ hostname: String) -> String {
+        if hostname.contains("mobile-live-v26") {
+            return webServers[0]
+        }
+        return hostname
+    }
 
     struct ServerInfo {
         let url: String
@@ -56,13 +75,13 @@ class ServerResolver {
            let parsed = URLComponents(string: wsURL),
            let host = parsed.host {
             let token = interceptor.capturedToken ?? partyCode
-            let port = parsed.port ?? 443
-            let ip = interceptor.capturedServerIP ?? host
-            let hostname = isIPAddress(host) ? hostnameForIP(ip) : host
+            let rawHostname = isIPAddress(host) ? hostnameForIP(host) : host
+            let hostname = mobileToWeb(rawHostname)
+            let port = hostname.contains("web-arenas") ? 443 : (parsed.port ?? 443)
 
             completion(.success(ServerInfo(
                 url: "wss://\(hostname):\(port)",
-                token: token, ip: ip, port: port, hostname: hostname
+                token: token, ip: host, port: port, hostname: hostname
             )))
             return
         }
@@ -70,8 +89,9 @@ class ServerResolver {
         if let bsdServer = UserDefaults.standard.string(forKey: "XRD_bsdServer"),
            !bsdServer.isEmpty,
            let parsed = URLComponents(string: bsdServer), let host = parsed.host {
-            let port = parsed.port ?? 443
-            let hostname = isIPAddress(host) ? hostnameForIP(host) : host
+            let rawHostname = isIPAddress(host) ? hostnameForIP(host) : host
+            let hostname = mobileToWeb(rawHostname)
+            let port = hostname.contains("web-arenas") ? 443 : (parsed.port ?? 443)
 
             completion(.success(ServerInfo(
                 url: "wss://\(hostname):\(port)",
@@ -80,73 +100,11 @@ class ServerResolver {
             return
         }
 
-        guard let endpointStr = interceptor.discoveredAPIEndpoint,
-              let endpoint = URL(string: endpointStr) else {
-            completion(.failure(ServerError.noServer))
-            return
-        }
-
-        var request = URLRequest(url: endpoint)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("https://agar.io", forHTTPHeaderField: "Origin")
-
-        if let headers = interceptor.discoveredHeaders {
-            for (key, value) in headers {
-                if key.lowercased() != "content-length" {
-                    request.setValue(value, forHTTPHeaderField: key)
-                }
-            }
-        }
-
-        var body: [String: Any] = ["mode": partyCode.isEmpty ? ":ffa" : ":party"]
-        if !partyCode.isEmpty {
-            body["token"] = partyCode
-        }
-        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-
-        let session = URLSession.shared
-        NetworkInterceptor.shared.botSessions.add(session)
-
-        session.dataTask(with: request) { data, _, error in
-            if let error = error {
-                completion(.failure(error))
-                return
-            }
-            guard let data = data,
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                completion(.failure(ServerError.invalidResponse))
-                return
-            }
-
-            var serverURL: String?
-            if let endpoints = json["endpoints"] as? [[String: Any]],
-               let first = endpoints.first,
-               let url = first["url"] as? String {
-                serverURL = url
-            } else if let url = json["url"] as? String {
-                serverURL = url
-            } else if let url = json["server"] as? String {
-                serverURL = url
-            }
-
-            guard let server = serverURL else {
-                completion(.failure(ServerError.noServerFound))
-                return
-            }
-
-            let token = (json["token"] as? String) ?? ""
-            let wsURL = server.hasPrefix("wss://") ? server : "wss://\(server)"
-            if let parsed = URLComponents(string: wsURL), let host = parsed.host {
-                let p = parsed.port ?? 443
-                let hostname = isIPAddress(host) ? hostnameForIP(host) : host
-                completion(.success(ServerInfo(
-                    url: wsURL, token: token, ip: host, port: p, hostname: hostname
-                )))
-            } else {
-                completion(.failure(ServerError.invalidResponse))
-            }
-        }.resume()
+        let fallback = webServers[0]
+        completion(.success(ServerInfo(
+            url: "wss://\(fallback)",
+            token: partyCode, ip: fallback, port: 443, hostname: fallback
+        )))
     }
 
     enum ServerError: LocalizedError {

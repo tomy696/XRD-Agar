@@ -20,11 +20,6 @@ class BotEngine: ObservableObject {
     func startBots(config: BotConfiguration) {
         guard !isRunning else { return }
 
-        guard NetworkInterceptor.shared.hasServer else {
-            statusMessage = "No server - play a game first"
-            return
-        }
-
         isRunning = true
         statusMessage = "Resolving..."
 
