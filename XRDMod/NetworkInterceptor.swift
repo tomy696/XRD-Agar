@@ -151,7 +151,10 @@ class NetworkInterceptor: NSObject {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
 
         var serverURL: String?
-        if let endpoints = json["endpoints"] as? [[String: Any]],
+        if let endpoints = json["endpoints"] as? [String: String],
+           let httpsPath = endpoints["https"] ?? endpoints["http"] {
+            serverURL = "wss://\(httpsPath)"
+        } else if let endpoints = json["endpoints"] as? [[String: Any]],
            let first = endpoints.first,
            let u = first["url"] as? String {
             serverURL = u
