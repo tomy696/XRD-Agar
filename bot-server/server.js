@@ -14,9 +14,12 @@ let sessionCounter = 0;
 
 // Rotating proxy gateway: one URL, each connection = different IP
 // Set via Railway env var: PROXY_GATEWAY=socks5://user:pass@gateway:port
+// Set USE_PROXY=true to enable (disabled by default to avoid breaking WS)
 const PROXY_GATEWAY = process.env.PROXY_GATEWAY || '';
+const USE_PROXY = process.env.USE_PROXY === 'true';
 
 function getNextProxy() {
+  if (!USE_PROXY) return null;
   if (PROXY_GATEWAY) return PROXY_GATEWAY;
   if (proxyPool.length === 0) return null;
   const proxy = proxyPool[proxyIndex % proxyPool.length];
@@ -147,13 +150,30 @@ app.post('/api/start', async (req, res) => {
   const botNames = names || Array.from({ length: botCount }, (_, i) => `XRD${i + 1}`);
 
   let serverInfo;
-  try {
-    const gm = partyCode ? ':party' : gameMode;
-    serverInfo = await findServer(region, gm, partyCode || undefined);
-    console.log(`[start] bouncer: ${serverInfo.fullPath} region=${region} gm=${gm} party=${partyCode || 'none'}`);
-  } catch (e) {
-    console.log(`[start] findServer failed: ${e.message}`);
-    return res.status(500).json({ error: `findServer failed: ${e.message}` });
+  let generatedPartyCode = null;
+
+  if (partyCode) {
+    try {
+      serverInfo = await findServer(region, ':party', partyCode);
+      console.log(`[start] party join: ${serverInfo.fullPath} code=${partyCode}`);
+    } catch (e) {
+      console.log(`[start] party join failed: ${e.message}`);
+      return res.status(500).json({ error: `party join failed: ${e.message}` });
+    }
+  } else {
+    try {
+      serverInfo = await findServer(region, ':party');
+      generatedPartyCode = serverInfo.token || null;
+      console.log(`[start] auto-party: ${serverInfo.fullPath} token=${generatedPartyCode}`);
+    } catch (e) {
+      console.log(`[start] auto-party failed, trying FFA: ${e.message}`);
+      try {
+        serverInfo = await findServer(region, gameMode);
+        console.log(`[start] FFA fallback: ${serverInfo.fullPath}`);
+      } catch (e2) {
+        return res.status(500).json({ error: `findServer failed: ${e2.message}` });
+      }
+    }
   }
 
   console.log(`[start] server=${serverInfo.url} host=${serverInfo.hostname}`);
@@ -197,12 +217,16 @@ app.post('/api/start', async (req, res) => {
     setTimeout(() => bots[i].connect(), i * 1500);
   }
 
-  res.json({
+  const response = {
     sessionId,
     serverURL: serverInfo.url,
     hostname: serverInfo.hostname,
     botCount
-  });
+  };
+  if (generatedPartyCode) {
+    response.partyCode = generatedPartyCode;
+  }
+  res.json(response);
 });
 
 app.post('/api/create-party', async (req, res) => {

@@ -11,6 +11,7 @@ class BotServerClient: ObservableObject {
     @Published var paused: Bool = false
     @Published var statusMessage: String = "Idle"
     @Published var serverBotURL: String = ""
+    @Published var activePartyCode: String = ""
 
     private var pollTimer: Timer?
     private let session = URLSession(configuration: .ephemeral)
@@ -63,7 +64,13 @@ class BotServerClient: ObservableObject {
                     self?.total = json["botCount"] as? Int ?? count
                     self?.isConnected = true
                     self?.paused = false
-                    self?.statusMessage = "Spawning \(count) bots..."
+                    if let pc = json["partyCode"] as? String, !pc.isEmpty {
+                        self?.activePartyCode = pc
+                        self?.statusMessage = "Party: \(pc) - Join it!"
+                        UIPasteboard.general.string = pc
+                    } else {
+                        self?.statusMessage = "Spawning \(count) bots..."
+                    }
                     self?.startPolling()
                 case .failure(let err):
                     self?.statusMessage = "Error: \(err.localizedDescription)"
@@ -164,6 +171,7 @@ class BotServerClient: ObservableObject {
         alive = 0
         total = 0
         paused = false
+        activePartyCode = ""
     }
 
     // MARK: - HTTP

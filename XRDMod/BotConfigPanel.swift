@@ -14,6 +14,7 @@ struct BotConfigPanel: View {
         VStack(spacing: 8) {
             launchButtons
             if botEngine.isRunning { botStats }
+            if !botEngine.client.activePartyCode.isEmpty { partyCodeBanner }
             regionSection
             botCountSection
             partySection
@@ -68,6 +69,42 @@ struct BotConfigPanel: View {
             statPill("Total", "\(botEngine.totalSpawned)")
             statPill("Alive", "\(botEngine.totalAlive)")
         }
+    }
+
+    // MARK: - Party Code Banner (auto-generated)
+
+    private var partyCodeBanner: some View {
+        VStack(spacing: 4) {
+            Text("JOIN THIS PARTY")
+                .font(.system(size: 8, weight: .black, design: .monospaced))
+                .foregroundColor(.green)
+                .tracking(1.5)
+            Text(botEngine.client.activePartyCode)
+                .font(.system(size: 14, weight: .black, design: .monospaced))
+                .foregroundColor(.white)
+            Text("Copied to clipboard! Paste in game.")
+                .font(.system(size: 7, design: .monospaced))
+                .foregroundColor(.gray)
+            Button(action: {
+                UIPasteboard.general.string = botEngine.client.activePartyCode
+            }) {
+                Text("COPY AGAIN")
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .foregroundColor(xrdCyan)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 4)
+                    .background(Color.white.opacity(0.1))
+                    .cornerRadius(4)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(8)
+        .background(Color.green.opacity(0.1))
+        .cornerRadius(8)
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.green.opacity(0.3), lineWidth: 1)
+        )
     }
 
     // MARK: - Region
