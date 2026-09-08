@@ -4,7 +4,6 @@ struct BotConfigPanel: View {
     @ObservedObject var settings: GameSettings
     @ObservedObject var botEngine: BotEngine
     @State private var nameInput: String = ""
-    @State private var groupCode: String = ""
     @State private var copiedUID: String = ""
     @State private var didInit = false
 
@@ -27,49 +26,74 @@ struct BotConfigPanel: View {
             guard !didInit else { return }
             didInit = true
             nameInput = settings.botConfig.botNames.joined(separator: ", ")
-            groupCode = settings.botConfig.partyCode
         }
     }
 
-    // MARK: - Launch / Stop (TOP)
+    // MARK: - Launch / Pause / Stop (TOP)
 
     private var launchButtons: some View {
-        HStack(spacing: 8) {
-            Button(action: launchBots) {
-                HStack(spacing: 3) {
-                    Image(systemName: "bolt.fill").font(.system(size: 10))
-                    Text("LAUNCH").font(.system(size: 10, weight: .black, design: .monospaced))
+        VStack(spacing: 6) {
+            HStack(spacing: 6) {
+                Button(action: launchBots) {
+                    HStack(spacing: 3) {
+                        Image(systemName: "bolt.fill").font(.system(size: 10))
+                        Text("LAUNCH").font(.system(size: 10, weight: .black, design: .monospaced))
+                    }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(xrdGradient)
+                    .cornerRadius(8)
                 }
-                .foregroundColor(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-                .background(xrdGradient)
-                .cornerRadius(8)
-            }
-            .disabled(botEngine.isRunning)
-            .opacity(botEngine.isRunning ? 0.5 : 1)
+                .disabled(botEngine.isRunning)
+                .opacity(botEngine.isRunning ? 0.5 : 1)
 
-            Button(action: { botEngine.stopBots() }) {
-                HStack(spacing: 3) {
-                    Image(systemName: "stop.fill").font(.system(size: 10))
-                    Text("STOP").font(.system(size: 10, weight: .black, design: .monospaced))
+                Button(action: {
+                    if botEngine.isPaused { botEngine.resumeBots() }
+                    else { botEngine.pauseBots() }
+                }) {
+                    HStack(spacing: 3) {
+                        Image(systemName: botEngine.isPaused ? "play.fill" : "pause.fill").font(.system(size: 10))
+                        Text(botEngine.isPaused ? "RESUME" : "PAUSE").font(.system(size: 10, weight: .black, design: .monospaced))
+                    }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(botEngine.isPaused ? Color.green.opacity(0.7) : Color.orange.opacity(0.8))
+                    .cornerRadius(8)
                 }
-                .foregroundColor(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-                .background(Color.red.opacity(0.8))
-                .cornerRadius(8)
+                .disabled(!botEngine.isRunning)
+                .opacity(!botEngine.isRunning ? 0.5 : 1)
+
+                Button(action: { botEngine.stopBots() }) {
+                    HStack(spacing: 3) {
+                        Image(systemName: "stop.fill").font(.system(size: 10))
+                        Text("STOP").font(.system(size: 10, weight: .black, design: .monospaced))
+                    }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(Color.red.opacity(0.8))
+                    .cornerRadius(8)
+                }
+                .disabled(!botEngine.isRunning)
+                .opacity(!botEngine.isRunning ? 0.5 : 1)
             }
-            .disabled(!botEngine.isRunning)
-            .opacity(!botEngine.isRunning ? 0.5 : 1)
+
+            Text(botEngine.statusMessage)
+                .font(.system(size: 8, weight: .bold, design: .monospaced))
+                .foregroundColor(botEngine.isRunning ? xrdCyan : .gray)
+                .frame(maxWidth: .infinity, alignment: .center)
         }
     }
 
     private var botStats: some View {
         HStack {
-            statPill("Spawned", "\(botEngine.totalSpawned)")
+            statPill("Total", "\(botEngine.totalSpawned)")
             statPill("Alive", "\(botEngine.totalAlive)")
-            statPill("Players", "\(settings.currentPlayers.count)")
+            if botEngine.isPaused {
+                statPill("Status", "PAUSED")
+            }
         }
     }
 
@@ -161,26 +185,21 @@ struct BotConfigPanel: View {
                 }
             }
 
-            HStack(spacing: 4) {
-                Text("Code")
-                    .font(.system(size: 8, weight: .bold, design: .monospaced))
-                    .foregroundColor(.gray)
-                    .frame(width: 38, alignment: .leading)
-                TextField("Party code", text: $groupCode)
-                    .textFieldStyle(XRDTextFieldStyle())
-                Button(action: {
-                    if let s = UIPasteboard.general.string { groupCode = s }
-                }) {
-                    Image(systemName: "doc.on.clipboard")
-                        .font(.system(size: 10))
-                        .foregroundColor(xrdCyan)
-                        .padding(5)
-                        .background(Color.white.opacity(0.1))
-                        .cornerRadius(5)
-                }
-            }
+            serverStatus
         }
         .sectionStyle()
+    }
+
+    private var serverStatus: some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(NetworkInterceptor.shared.hasServer ? Color.green : Color.red)
+                .frame(width: 6, height: 6)
+            Text(NetworkInterceptor.shared.hasServer ? "Server detected" : "Play a game first")
+                .font(.system(size: 8, weight: .medium, design: .monospaced))
+                .foregroundColor(NetworkInterceptor.shared.hasServer ? .green.opacity(0.8) : .red.opacity(0.8))
+            Spacer()
+        }
     }
 
     // MARK: - Bot Settings
@@ -215,7 +234,6 @@ struct BotConfigPanel: View {
     // MARK: - Actions
 
     private func launchBots() {
-        settings.botConfig.partyCode = groupCode
         botEngine.startBots(config: settings.botConfig)
     }
 

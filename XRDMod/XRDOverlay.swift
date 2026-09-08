@@ -32,7 +32,6 @@ class XRDOverlay: NSObject {
         }
 
         gameWindow = mainWindow
-        botEngine.settings = settings
         settings.load()
         installContainer()
         observeLifecycle()
@@ -339,13 +338,10 @@ class XRDOverlay: NSObject {
         L.append("-- FEATURES --")
         L.append("Bots: running=\(botEngine.isRunning) alive=\(botEngine.totalAlive) spawned=\(botEngine.totalSpawned)")
         L.append("Bots.status: \(botEngine.statusMessage)")
-        L.append("Bots.lastURL: \(botEngine.lastResolvedURL ?? "none")")
+        L.append("Bots.paused: \(botEngine.isPaused)")
+        L.append("Bots.session: \(botEngine.client.sessionId ?? "none")")
+        L.append("Bots.serverURL: \(botEngine.client.baseURL)")
         L.append("Bots.capturedIP: \(ni.capturedServerIP ?? "none"):\(ni.capturedServerPort ?? 0)")
-        for (i, bot) in botEngine.bots.prefix(5).enumerated() {
-            L.append("  Bot[\(i)]: \(bot.state) mode=\(bot.connMode) host=\(bot.serverHostname) pkts=\(bot.serverPacketCount) err=\(bot.lastError)")
-        }
-        L.append("Bots.log(\(AgarBot.recentLog.count)):")
-        for entry in AgarBot.recentLog.suffix(20) { L.append("  \(entry)") }
 
         L.append("")
         L.append("-- WINDOWS --")
