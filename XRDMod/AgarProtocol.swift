@@ -3,7 +3,7 @@ import Foundation
 class AgarProtocol {
 
     static let protocolVersion: UInt32 = 23
-    static let clientVersion: String = "26.6.0"
+    static let clientVersion: String = "3.11.29"
 
     // MARK: - Client → Server Packets
 
