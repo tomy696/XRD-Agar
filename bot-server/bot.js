@@ -1,7 +1,8 @@
 const WebSocket = require('ws');
 const proto = require('./protocol');
-let SocksProxyAgent;
+let SocksProxyAgent, HttpsProxyAgent;
 try { SocksProxyAgent = require('socks-proxy-agent').SocksProxyAgent; } catch(e) {}
+try { HttpsProxyAgent = require('https-proxy-agent').HttpsProxyAgent; } catch(e) {}
 
 const CLIENT_VERSION = '3.11.29';
 const PROTOCOL_VERSION = 23;
@@ -70,9 +71,14 @@ class AgarBot {
         rejectUnauthorized: false,
         handshakeTimeout: 10000
       };
-      if (this.proxy && SocksProxyAgent) {
-        wsOpts.agent = new SocksProxyAgent(this.proxy);
-        this.addLog(`using proxy: ${this.proxy.replace(/:[^:@]+@/, ':***@')}`);
+      if (this.proxy) {
+        const isSocks = this.proxy.startsWith('socks');
+        if (isSocks && SocksProxyAgent) {
+          wsOpts.agent = new SocksProxyAgent(this.proxy);
+        } else if (!isSocks && HttpsProxyAgent) {
+          wsOpts.agent = new HttpsProxyAgent(this.proxy);
+        }
+        this.addLog(`using proxy (${isSocks ? 'socks' : 'http'}): ${this.proxy.replace(/:[^:@]+@/, ':***@')}`);
       }
       this.ws = new WebSocket(this.serverURL, wsOpts);
     } catch (e) {
