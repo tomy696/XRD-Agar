@@ -21,7 +21,20 @@ class BotServerClient: ObservableObject {
         return url.isEmpty ? defaultURL : url
     }
 
-    func startBots(count: Int, names: [String], mode: String, targetX: Double, targetY: Double, gameServerURL: String?, serverIP: String? = nil, partyCode: String? = nil, region: String = "EU-London") {
+    func validateKey(_ key: String, completion: @escaping (Bool, Int?) -> Void) {
+        post("/api/keys/validate", body: ["botKey": key]) { result in
+            switch result {
+            case .success(let json):
+                let valid = json["valid"] as? Bool ?? false
+                let maxBots = json["maxBots"] as? Int
+                completion(valid, maxBots)
+            case .failure:
+                completion(false, nil)
+            }
+        }
+    }
+
+    func startBots(count: Int, names: [String], mode: String, targetX: Double, targetY: Double, gameServerURL: String?, serverIP: String? = nil, partyCode: String? = nil, region: String = "EU-London", botKey: String? = nil) {
         guard sessionId == nil else { return }
 
         statusMessage = "Starting..."
@@ -43,6 +56,9 @@ class BotServerClient: ObservableObject {
         }
         if let code = partyCode, !code.isEmpty {
             body["partyCode"] = code
+        }
+        if let key = botKey, !key.isEmpty {
+            body["botKey"] = key
         }
 
         post("/api/start", body: body) { [weak self] result in

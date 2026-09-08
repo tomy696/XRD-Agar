@@ -163,7 +163,7 @@ struct ModMenuView: View {
                     Button(action: {
                         GameHooks.feedMacroActive.toggle()
                         if GameHooks.feedMacroActive {
-                            gameHooks.startFeedMacro(rate: settings.botConfig.feedMacroRate, size: settings.botConfig.feedMacroSize)
+                            gameHooks.startFeedMacro(rate: settings.botConfig.feedMacroRate, size: settings.botConfig.feedMacroSize, invisible: settings.botConfig.invisibleFeed)
                         }
                     }) {
                         Text(GameHooks.feedMacroActive ? "FEED ON" : "FEED")
@@ -175,9 +175,9 @@ struct ModMenuView: View {
                             .cornerRadius(6)
                     }
                     Button(action: {
-                        gameHooks.startSplitMacro(count: 16, rate: settings.botConfig.splitMacroRate)
+                        gameHooks.startSplitMacro(count: settings.botConfig.softMacroAmount, rate: settings.botConfig.splitMacroRate, invisible: settings.botConfig.invisibleSplit)
                     }) {
-                        Text("SPLIT x16")
+                        Text("SPLIT x\(settings.botConfig.softMacroAmount)")
                             .font(.system(size: 9, weight: .black, design: .monospaced))
                             .foregroundColor(.white)
                             .frame(maxWidth: .infinity)
@@ -208,6 +208,26 @@ struct ModMenuView: View {
                     }
                 }
 
+                HStack(spacing: 4) {
+                    Text("Split Amt")
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .foregroundColor(.gray)
+                    Spacer()
+                    ForEach([4, 8, 16, 32], id: \.self) { n in
+                        Button("\(n)") {
+                            settings.botConfig.softMacroAmount = n
+                        }
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(settings.botConfig.softMacroAmount == n ? xrdPurple : Color.white.opacity(0.08))
+                        .cornerRadius(4)
+                    }
+                }
+
+                modToggle("Invisible Feed", isOn: $settings.botConfig.invisibleFeed)
+                modToggle("Invisible Split", isOn: $settings.botConfig.invisibleSplit)
                 modToggle("Center Self Feed", isOn: $settings.botConfig.centerSelfFeed)
 
                 Button(action: { gameHooks.stopMacros() }) {

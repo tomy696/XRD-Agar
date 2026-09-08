@@ -18,7 +18,11 @@ struct BotConfiguration {
     var splitMacroRate: Double = 40
     var feedMacroSize: Int = 1
     var centerSelfFeed: Bool = false
+    var invisibleFeed: Bool = false
+    var invisibleSplit: Bool = false
+    var softMacroAmount: Int = 16
     var region: String = "EU-London"
+    var botKey: String = ""
 
     var resolvedNames: [String] {
         (0..<botCount).map { i in

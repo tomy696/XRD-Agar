@@ -7,6 +7,7 @@ const app = express();
 app.use(express.json());
 
 const sessions = new Map();
+const botKeys = new Map();
 let sessionCounter = 0;
 
 const WEB_BOUNCER = 'webbouncer-live-v8-0.agario.miniclippt.com';
@@ -116,9 +117,19 @@ app.get('/api/test', async (req, res) => {
 });
 
 app.post('/api/start', async (req, res) => {
-  const { count = 5, names, mode = 'feed', region = 'EU-London', gameMode = ':ffa', targetX = 0, targetY = 0, serverURL, serverIP, proxy, proxies, partyCode } = req.body;
+  const { count = 5, names, mode = 'feed', region = 'EU-London', gameMode = ':ffa', targetX = 0, targetY = 0, serverURL, serverIP, proxy, proxies, partyCode, botKey } = req.body;
 
-  const botCount = Math.min(count, 50);
+  let maxAllowed = 50;
+  if (botKey) {
+    const hashed = hashKey(botKey);
+    const entry = botKeys.get(hashed);
+    if (!entry) return res.status(403).json({ error: 'invalid bot key' });
+    if (Date.now() > entry.expiresAt) return res.status(403).json({ error: 'bot key expired' });
+    maxAllowed = entry.maxBots || 50;
+    entry.uses++;
+  }
+
+  const botCount = Math.min(count, maxAllowed);
   const botNames = names || Array.from({ length: botCount }, (_, i) => `XRD${i + 1}`);
 
   let serverInfo;
@@ -308,6 +319,64 @@ app.get('/api/sessions', (req, res) => {
     list.push({ sessionId: id, alive, total: session.bots.length, mode: session.mode, server: session.serverInfo.url });
   }
   res.json({ sessions: list });
+});
+
+// Bot key system
+const crypto = require('crypto');
+const ADMIN_SECRET = process.env.ADMIN_SECRET || 'xrd-admin-2024';
+
+function generateBotKey() {
+  return 'XRD-' + crypto.randomBytes(12).toString('hex').toUpperCase();
+}
+
+function hashKey(key) {
+  return crypto.createHmac('sha256', ADMIN_SECRET).update(key).digest('hex');
+}
+
+app.post('/api/keys/create', (req, res) => {
+  const { adminKey, maxBots = 50, duration = 30, label = '' } = req.body;
+  if (adminKey !== ADMIN_SECRET) return res.status(403).json({ error: 'unauthorized' });
+
+  const key = generateBotKey();
+  const expiresAt = Date.now() + duration * 24 * 60 * 60 * 1000;
+  botKeys.set(hashKey(key), { maxBots, expiresAt, label, createdAt: Date.now(), uses: 0 });
+  res.json({ key, maxBots, expiresAt, label });
+});
+
+app.post('/api/keys/validate', (req, res) => {
+  const { botKey } = req.body;
+  if (!botKey) return res.status(400).json({ error: 'missing botKey' });
+
+  const hashed = hashKey(botKey);
+  const entry = botKeys.get(hashed);
+  if (!entry) return res.json({ valid: false, error: 'invalid key' });
+  if (Date.now() > entry.expiresAt) return res.json({ valid: false, error: 'expired' });
+
+  entry.uses++;
+  res.json({ valid: true, maxBots: entry.maxBots, expiresAt: entry.expiresAt, label: entry.label });
+});
+
+app.post('/api/keys/revoke', (req, res) => {
+  const { adminKey, botKey } = req.body;
+  if (adminKey !== ADMIN_SECRET) return res.status(403).json({ error: 'unauthorized' });
+
+  const hashed = hashKey(botKey);
+  if (botKeys.delete(hashed)) {
+    res.json({ status: 'revoked' });
+  } else {
+    res.status(404).json({ error: 'key not found' });
+  }
+});
+
+app.get('/api/keys/list', (req, res) => {
+  const { adminKey } = req.query;
+  if (adminKey !== ADMIN_SECRET) return res.status(403).json({ error: 'unauthorized' });
+
+  const list = [];
+  for (const [hash, entry] of botKeys) {
+    list.push({ hash: hash.substring(0, 8) + '...', ...entry, expired: Date.now() > entry.expiresAt });
+  }
+  res.json({ keys: list });
 });
 
 setInterval(() => {

@@ -17,6 +17,7 @@ struct BotConfigPanel: View {
         VStack(spacing: 8) {
             launchButtons
             if botEngine.isRunning { botStats }
+            botKeySection
             partySection
             regionSection
             playerList
@@ -229,6 +230,34 @@ struct BotConfigPanel: View {
             }
 
             XRDDropdown(label: "Action", selection: $settings.botConfig.botAction)
+        }
+        .sectionStyle()
+    }
+
+    // MARK: - Bot Key
+
+    private var botKeySection: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            sectionHeader("BOT KEY")
+            Text("License key for bot access")
+                .font(.system(size: 7, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.5))
+            HStack(spacing: 4) {
+                TextField("XRD-XXXX...", text: $settings.botConfig.botKey)
+                    .textFieldStyle(XRDTextFieldStyle())
+                Button(action: {
+                    if let s = UIPasteboard.general.string {
+                        settings.botConfig.botKey = s
+                    }
+                }) {
+                    Image(systemName: "doc.on.clipboard")
+                        .font(.system(size: 10))
+                        .foregroundColor(xrdCyan)
+                        .padding(5)
+                        .background(Color.white.opacity(0.1))
+                        .cornerRadius(5)
+                }
+            }
         }
         .sectionStyle()
     }

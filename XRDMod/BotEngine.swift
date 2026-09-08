@@ -58,7 +58,8 @@ class BotEngine: ObservableObject {
             gameServerURL: gameServerURL,
             serverIP: serverIP,
             partyCode: config.partyCode.isEmpty ? nil : config.partyCode,
-            region: config.region
+            region: config.region,
+            botKey: config.botKey.isEmpty ? nil : config.botKey
         )
     }
 

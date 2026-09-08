@@ -491,7 +491,7 @@ class GameHooks: NSObject, ObservableObject {
         for sub in view.subviews { collectControls(in: sub, into: &list) }
     }
 
-    func startFeedMacro(rate: Double = 50, size: Int = 1) {
+    func startFeedMacro(rate: Double = 50, size: Int = 1, invisible: Bool = false) {
         guard GameHooks.feedMacroActive else { return }
         macroTimer?.invalidate()
         let interval = max(0.02, 1.0 / rate)
@@ -502,16 +502,24 @@ class GameHooks: NSObject, ObservableObject {
                 return
             }
             for _ in 0..<max(1, size) {
-                self?.tapButton(self?.feedButton)
+                if invisible {
+                    NetworkInterceptor.shared.sendFeed()
+                } else {
+                    self?.tapButton(self?.feedButton)
+                }
             }
         }
     }
 
-    func startSplitMacro(count: Int = 16, rate: Double = 40) {
+    func startSplitMacro(count: Int = 16, rate: Double = 40, invisible: Bool = false) {
         let interval = max(0.02, 1.0 / rate)
         for i in 0..<count {
             DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * interval) { [weak self] in
-                self?.tapButton(self?.splitButton)
+                if invisible {
+                    NetworkInterceptor.shared.sendSplit()
+                } else {
+                    self?.tapButton(self?.splitButton)
+                }
             }
         }
     }
