@@ -162,7 +162,9 @@ struct ModMenuView: View {
                 HStack(spacing: 6) {
                     Button(action: {
                         GameHooks.feedMacroActive.toggle()
-                        if GameHooks.feedMacroActive { gameHooks.startFeedMacro() }
+                        if GameHooks.feedMacroActive {
+                            gameHooks.startFeedMacro(rate: settings.botConfig.feedMacroRate, size: settings.botConfig.feedMacroSize)
+                        }
                     }) {
                         Text(GameHooks.feedMacroActive ? "FEED ON" : "FEED")
                             .font(.system(size: 9, weight: .black, design: .monospaced))
@@ -173,7 +175,7 @@ struct ModMenuView: View {
                             .cornerRadius(6)
                     }
                     Button(action: {
-                        gameHooks.startSplitMacro(count: 16)
+                        gameHooks.startSplitMacro(count: 16, rate: settings.botConfig.splitMacroRate)
                     }) {
                         Text("SPLIT x16")
                             .font(.system(size: 9, weight: .black, design: .monospaced))
@@ -184,6 +186,30 @@ struct ModMenuView: View {
                             .cornerRadius(6)
                     }
                 }
+
+                macroSlider("Feed Rate", value: $settings.botConfig.feedMacroRate, range: 5...100, unit: "/s")
+                macroSlider("Split Rate", value: $settings.botConfig.splitMacroRate, range: 5...100, unit: "/s")
+
+                HStack(spacing: 4) {
+                    Text("Feed Size")
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .foregroundColor(.gray)
+                    Spacer()
+                    ForEach([1, 3, 5, 7], id: \.self) { n in
+                        Button("\(n)") {
+                            settings.botConfig.feedMacroSize = n
+                        }
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(settings.botConfig.feedMacroSize == n ? xrdPurple : Color.white.opacity(0.08))
+                        .cornerRadius(4)
+                    }
+                }
+
+                modToggle("Center Self Feed", isOn: $settings.botConfig.centerSelfFeed)
+
                 Button(action: { gameHooks.stopMacros() }) {
                     Text("STOP MACROS")
                         .font(.system(size: 8, weight: .bold, design: .monospaced))
@@ -216,6 +242,21 @@ struct ModMenuView: View {
             .sectionStyle()
 
             Spacer(minLength: 8)
+        }
+    }
+
+    private func macroSlider(_ label: String, value: Binding<Double>, range: ClosedRange<Double>, unit: String) -> some View {
+        HStack(spacing: 4) {
+            Text(label)
+                .font(.system(size: 8, weight: .bold, design: .monospaced))
+                .foregroundColor(.gray)
+                .frame(width: 55, alignment: .leading)
+            Slider(value: value, in: range, step: 5)
+                .accentColor(xrdPurple)
+            Text("\(Int(value.wrappedValue))\(unit)")
+                .font(.system(size: 8, weight: .black, design: .monospaced))
+                .foregroundColor(xrdCyan)
+                .frame(width: 30, alignment: .trailing)
         }
     }
 

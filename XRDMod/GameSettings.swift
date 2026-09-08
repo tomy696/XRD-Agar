@@ -39,6 +39,11 @@ class GameSettings: ObservableObject {
         defaults.set(botConfig.partyCode, forKey: k("partyCode"))
         defaults.set(botConfig.targetUID, forKey: k("targetUID"))
         defaults.set(botConfig.botAction.rawValue, forKey: k("botAction"))
+        defaults.set(botConfig.feedMacroRate, forKey: k("feedMacroRate"))
+        defaults.set(botConfig.splitMacroRate, forKey: k("splitMacroRate"))
+        defaults.set(botConfig.feedMacroSize, forKey: k("feedMacroSize"))
+        defaults.set(botConfig.centerSelfFeed, forKey: k("centerSelfFeed"))
+        defaults.set(botConfig.region, forKey: k("region"))
         defaults.synchronize()
     }
 
@@ -60,6 +65,14 @@ class GameSettings: ObservableObject {
         if let raw = defaults.string(forKey: k("botAction")), let v = BotAction(rawValue: raw) {
             botConfig.botAction = v
         }
+        let fr = defaults.double(forKey: k("feedMacroRate"))
+        botConfig.feedMacroRate = fr > 0 ? fr : 50
+        let sr = defaults.double(forKey: k("splitMacroRate"))
+        botConfig.splitMacroRate = sr > 0 ? sr : 40
+        let fs = defaults.integer(forKey: k("feedMacroSize"))
+        botConfig.feedMacroSize = fs > 0 ? fs : 1
+        botConfig.centerSelfFeed = defaults.bool(forKey: k("centerSelfFeed"))
+        botConfig.region = defaults.string(forKey: k("region")) ?? "EU-London"
     }
 
     func resetAll() {

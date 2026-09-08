@@ -14,9 +14,9 @@ const CLIENT_VERSION_INT = '31129';
 const PROTO_VERSION = '15.0.3';
 const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 
-function findServer(region, gameMode) {
+function findServer(region, gameMode, partyToken) {
   return new Promise((resolve, reject) => {
-    const body = proto.encodeBouncerRequest(region, gameMode);
+    const body = proto.encodeBouncerRequest(region, gameMode, partyToken);
     const options = {
       hostname: WEB_BOUNCER,
       port: 443,
@@ -116,7 +116,7 @@ app.get('/api/test', async (req, res) => {
 });
 
 app.post('/api/start', async (req, res) => {
-  const { count = 5, names, mode = 'feed', region = 'EU-London', gameMode = ':ffa', targetX = 0, targetY = 0, serverURL, serverIP, proxy, proxies } = req.body;
+  const { count = 5, names, mode = 'feed', region = 'EU-London', gameMode = ':ffa', targetX = 0, targetY = 0, serverURL, serverIP, proxy, proxies, partyCode } = req.body;
 
   const botCount = Math.min(count, 50);
   const botNames = names || Array.from({ length: botCount }, (_, i) => `XRD${i + 1}`);
@@ -132,9 +132,10 @@ app.post('/api/start', async (req, res) => {
       serverInfo = { url: `wss://${stripped}`, hostname, token: '', fullPath: stripped };
       console.log(`[start] full path from client: ${serverInfo.fullPath}`);
     } else {
-      console.log(`[start] URL has no path (${stripped}), using bouncer directly`);
+      console.log(`[start] URL has no path (${stripped}), using bouncer`);
       try {
-        serverInfo = await findServer(region, gameMode);
+        const gm = partyCode ? ':party' : gameMode;
+        serverInfo = await findServer(region, gm, partyCode || undefined);
         console.log(`[start] bouncer server: ${serverInfo.fullPath}`);
       } catch (e) {
         console.log(`[start] bouncer failed: ${e.message}`);
@@ -143,8 +144,9 @@ app.post('/api/start', async (req, res) => {
     }
   } else {
     try {
-      serverInfo = await findServer(region, gameMode);
-      console.log(`[start] no URL provided, bouncer server: ${serverInfo.fullPath}`);
+      const gm = partyCode ? ':party' : gameMode;
+      serverInfo = await findServer(region, gm, partyCode || undefined);
+      console.log(`[start] bouncer server: ${serverInfo.fullPath} partyCode=${partyCode || 'none'}`);
     } catch (e) {
       console.log(`[start] findServer failed: ${e.message}`);
       return res.status(500).json({ error: `findServer failed: ${e.message}` });
@@ -193,6 +195,20 @@ app.post('/api/start', async (req, res) => {
     hostname: serverInfo.hostname,
     botCount
   });
+});
+
+app.post('/api/create-party', async (req, res) => {
+  const { region = 'EU-London' } = req.body;
+  try {
+    const serverInfo = await findServer(region, ':party');
+    res.json({
+      partyCode: serverInfo.token,
+      serverURL: serverInfo.url,
+      fullPath: serverInfo.fullPath
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.post('/api/stop', (req, res) => {

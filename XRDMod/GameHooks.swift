@@ -491,22 +491,26 @@ class GameHooks: NSObject, ObservableObject {
         for sub in view.subviews { collectControls(in: sub, into: &list) }
     }
 
-    func startFeedMacro() {
+    func startFeedMacro(rate: Double = 50, size: Int = 1) {
         guard GameHooks.feedMacroActive else { return }
         macroTimer?.invalidate()
-        macroTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+        let interval = max(0.02, 1.0 / rate)
+        macroTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             guard GameHooks.feedMacroActive else {
                 self?.macroTimer?.invalidate()
                 self?.macroTimer = nil
                 return
             }
-            self?.tapButton(self?.feedButton)
+            for _ in 0..<max(1, size) {
+                self?.tapButton(self?.feedButton)
+            }
         }
     }
 
-    func startSplitMacro(count: Int = 16) {
+    func startSplitMacro(count: Int = 16, rate: Double = 40) {
+        let interval = max(0.02, 1.0 / rate)
         for i in 0..<count {
-            DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 0.04) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * interval) { [weak self] in
                 self?.tapButton(self?.splitButton)
             }
         }

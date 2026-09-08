@@ -17,6 +17,8 @@ struct BotConfigPanel: View {
         VStack(spacing: 8) {
             launchButtons
             if botEngine.isRunning { botStats }
+            partySection
+            regionSection
             playerList
             targetSection
             botSettings
@@ -227,6 +229,58 @@ struct BotConfigPanel: View {
             }
 
             XRDDropdown(label: "Action", selection: $settings.botConfig.botAction)
+        }
+        .sectionStyle()
+    }
+
+    // MARK: - Party Code
+
+    private var partySection: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            sectionHeader("PARTY CODE")
+            Text("Bots join your party server")
+                .font(.system(size: 7, design: .monospaced))
+                .foregroundColor(.gray.opacity(0.5))
+            HStack(spacing: 4) {
+                TextField("Party code...", text: $settings.botConfig.partyCode)
+                    .textFieldStyle(XRDTextFieldStyle())
+                Button(action: {
+                    if let s = UIPasteboard.general.string {
+                        settings.botConfig.partyCode = s
+                    }
+                }) {
+                    Image(systemName: "doc.on.clipboard")
+                        .font(.system(size: 10))
+                        .foregroundColor(xrdCyan)
+                        .padding(5)
+                        .background(Color.white.opacity(0.1))
+                        .cornerRadius(5)
+                }
+            }
+        }
+        .sectionStyle()
+    }
+
+    // MARK: - Region Selector
+
+    private var regionSection: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            sectionHeader("REGION")
+            let regions = ["EU-London", "US-Atlanta", "US-Dallas", "US-San Jose",
+                           "East Asia", "South America", "China", "Oceania", "Turkey", "Russia"]
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 3) {
+                ForEach(regions, id: \.self) { r in
+                    Button(action: { settings.botConfig.region = r }) {
+                        Text(r.replacingOccurrences(of: "US-", with: "").prefix(10))
+                            .font(.system(size: 7, weight: .bold, design: .monospaced))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 4)
+                            .background(settings.botConfig.region == r ? xrdPurple : Color.white.opacity(0.08))
+                            .cornerRadius(4)
+                    }
+                }
+            }
         }
         .sectionStyle()
     }

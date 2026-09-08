@@ -245,13 +245,22 @@ function parseWorldBorder(data) {
   };
 }
 
-function encodeBouncerRequest(region, gamemode) {
+function encodeBouncerRequest(region, gamemode, partyToken) {
   const rb = Buffer.from(region, 'utf8');
   const mb = Buffer.from(gamemode, 'utf8');
-  const inner = Buffer.alloc(2 + rb.length + 2 + mb.length);
+  let innerLen = 2 + rb.length + 2 + mb.length;
+  let tb;
+  if (partyToken) {
+    tb = Buffer.from(partyToken, 'utf8');
+    innerLen += 2 + tb.length;
+  }
+  const inner = Buffer.alloc(innerLen);
   let off = 0;
   inner[off++] = 0x0A; inner[off++] = rb.length; rb.copy(inner, off); off += rb.length;
-  inner[off++] = 0x12; inner[off++] = mb.length; mb.copy(inner, off);
+  inner[off++] = 0x12; inner[off++] = mb.length; mb.copy(inner, off); off += mb.length;
+  if (tb) {
+    inner[off++] = 0x1A; inner[off++] = tb.length; tb.copy(inner, off);
+  }
   const outer = Buffer.alloc(2 + inner.length);
   outer[0] = 0x0A; outer[1] = inner.length; inner.copy(outer, 2);
   return outer;
