@@ -1,12 +1,14 @@
 const WebSocket = require('ws');
 const proto = require('./protocol');
+let SocksProxyAgent;
+try { SocksProxyAgent = require('socks-proxy-agent').SocksProxyAgent; } catch(e) {}
 
 const CLIENT_VERSION = '3.11.29';
 const PROTOCOL_VERSION = 23;
 const VERSION_INT = proto.versionToInt(CLIENT_VERSION);
 
 class AgarBot {
-  constructor(name, serverURL, hostname, token, mode, fullPath) {
+  constructor(name, serverURL, hostname, token, mode, fullPath, proxy) {
     this.name = name;
     this.serverURL = serverURL;
     this.hostname = hostname;
@@ -35,6 +37,7 @@ class AgarBot {
     this.gotWorldBorder = false;
     this.f1Raw = null;
     this.paused = false;
+    this.proxy = proxy || null;
   }
 
   addLog(msg) {
@@ -58,7 +61,7 @@ class AgarBot {
     this.addLog(`connecting to ${this.serverURL}`);
 
     try {
-      this.ws = new WebSocket(this.serverURL, {
+      const wsOpts = {
         origin: 'https://agar.io',
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
@@ -66,7 +69,12 @@ class AgarBot {
         },
         rejectUnauthorized: false,
         handshakeTimeout: 10000
-      });
+      };
+      if (this.proxy && SocksProxyAgent) {
+        wsOpts.agent = new SocksProxyAgent(this.proxy);
+        this.addLog(`using proxy: ${this.proxy.replace(/:[^:@]+@/, ':***@')}`);
+      }
+      this.ws = new WebSocket(this.serverURL, wsOpts);
     } catch (e) {
       this.addLog(`WS create error: ${e.message}`);
       this.lastError = e.message;

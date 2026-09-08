@@ -62,8 +62,61 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', sessions: sessions.size });
 });
 
+app.get('/api/test', async (req, res) => {
+  const region = req.query.region || 'EU-London';
+  const gameMode = req.query.gameMode || ':ffa';
+  const proxy = req.query.proxy || null;
+  const steps = [];
+
+  steps.push({ step: 'bouncer', status: 'starting', time: Date.now() });
+  let serverInfo;
+  try {
+    serverInfo = await findServer(region, gameMode);
+    steps.push({ step: 'bouncer', status: 'ok', fullPath: serverInfo.fullPath, url: serverInfo.url });
+  } catch (e) {
+    steps.push({ step: 'bouncer', status: 'failed', error: e.message });
+    return res.json({ success: false, steps });
+  }
+
+  steps.push({ step: 'bot_connect', status: 'starting', serverURL: serverInfo.url });
+  const bot = new AgarBot('TEST', serverInfo.url, serverInfo.hostname, serverInfo.token, 'feed', serverInfo.fullPath, proxy);
+
+  await new Promise(resolve => {
+    bot.connect();
+    let checks = 0;
+    const interval = setInterval(() => {
+      checks++;
+      if (bot.state === 'alive' || bot.state === 'disconnected' || checks >= 30) {
+        clearInterval(interval);
+        resolve();
+      }
+    }, 500);
+  });
+
+  steps.push({
+    step: 'result',
+    state: bot.state,
+    handshakeComplete: bot.handshakeComplete,
+    gotWorldBorder: bot.gotWorldBorder,
+    spawnAttempts: bot.spawnAttempts,
+    packetCount: bot.packetCount,
+    sendCount: bot.sendCount,
+    lastError: bot.lastError,
+    ownIDs: bot.ownIDs,
+    cellCount: bot.cells.size
+  });
+
+  bot.disconnect();
+  res.json({
+    success: bot.state === 'alive' || bot.handshakeComplete,
+    spawned: bot.ownIDs.length > 0,
+    steps,
+    logs: bot.log
+  });
+});
+
 app.post('/api/start', async (req, res) => {
-  const { count = 5, names, mode = 'feed', region = 'EU-London', gameMode = ':ffa', targetX = 0, targetY = 0, serverURL, serverIP } = req.body;
+  const { count = 5, names, mode = 'feed', region = 'EU-London', gameMode = ':ffa', targetX = 0, targetY = 0, serverURL, serverIP, proxy, proxies } = req.body;
 
   const botCount = Math.min(count, 50);
   const botNames = names || Array.from({ length: botCount }, (_, i) => `XRD${i + 1}`);
@@ -118,14 +171,18 @@ app.post('/api/start', async (req, res) => {
   const sessionId = `s${sessionCounter}_${Date.now().toString(36)}`;
   const bots = [];
 
+  const proxyList = proxies || (proxy ? [proxy] : []);
+
   for (let i = 0; i < botCount; i++) {
+    const botProxy = proxyList.length > 0 ? proxyList[i % proxyList.length] : null;
     const bot = new AgarBot(
       botNames[i % botNames.length],
       serverInfo.url,
       serverInfo.hostname,
       serverInfo.token,
       mode,
-      serverInfo.fullPath
+      serverInfo.fullPath,
+      botProxy
     );
     bot.setTarget(targetX, targetY);
     bots.push(bot);
@@ -180,6 +237,27 @@ app.get('/api/status/:sessionId', (req, res) => {
     bots: botStatuses,
     logs: session.bots.flatMap(b => b.log).slice(-50)
   });
+});
+
+app.get('/api/logs/:sessionId', (req, res) => {
+  const session = sessions.get(req.params.sessionId);
+  if (!session) return res.status(404).json({ error: 'session not found' });
+  const allLogs = session.bots.flatMap(b => b.log);
+  const botDetails = session.bots.map(b => ({
+    name: b.name,
+    state: b.state,
+    lastError: b.lastError,
+    handshake: b.handshakeComplete,
+    packets: b.packetCount,
+    sent: b.sendCount,
+    spawns: b.spawnAttempts,
+    worldBorder: b.gotWorldBorder,
+    cells: b.cells.size,
+    ownIDs: b.ownIDs,
+    proxy: b.proxy ? 'yes' : 'no',
+    log: b.log
+  }));
+  res.json({ bots: botDetails, logs: allLogs });
 });
 
 app.post('/api/target', (req, res) => {

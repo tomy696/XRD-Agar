@@ -113,13 +113,22 @@ class BotServerClient: ObservableObject {
                 case .success(let json):
                     let a = json["alive"] as? Int ?? 0
                     let t = json["total"] as? Int ?? 0
+                    let connected = json["connected"] as? Int ?? 0
                     self?.alive = a
                     self?.total = t
-                    if !( self?.paused ?? false) {
+                    if !(self?.paused ?? false) {
                         if a > 0 {
                             self?.statusMessage = "\(a)/\(t) alive"
                         } else if t > 0 {
-                            self?.statusMessage = "Spawning..."
+                            var states: [String: Int] = [:]
+                            if let bots = json["bots"] as? [[String: Any]] {
+                                for bot in bots {
+                                    let s = bot["state"] as? String ?? "?"
+                                    states[s, default: 0] += 1
+                                }
+                            }
+                            let stateStr = states.map { "\($0.value) \($0.key)" }.joined(separator: ", ")
+                            self?.statusMessage = stateStr.isEmpty ? "Spawning..." : stateStr
                         }
                     }
                     if t == 0 && self?.sessionId != nil {
