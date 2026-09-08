@@ -321,10 +321,11 @@ class AgarBot {
     this.addLog(`SPAWN #${this.spawnAttempts} name="${this.name}"`);
     this.gameSend(pkt);
 
-    if (this.spawnAttempts < 5) {
+    if (this.spawnAttempts < 15) {
+      const delay = this.spawnAttempts < 3 ? 2000 : 3000 + Math.random() * 2000;
       setTimeout(() => {
         if (this.state === 'spawning') this.trySpawn();
-      }, 2000);
+      }, delay);
     }
   }
 

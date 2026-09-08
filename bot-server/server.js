@@ -83,7 +83,7 @@ app.get('/health', (req, res) => {
 app.get('/api/test', async (req, res) => {
   const region = req.query.region || 'EU-London';
   const gameMode = req.query.gameMode || ':ffa';
-  const proxy = req.query.proxy || null;
+  const proxy = getNextProxy();
   const steps = [];
 
   steps.push({ step: 'bouncer', status: 'starting', time: Date.now() });
@@ -96,7 +96,7 @@ app.get('/api/test', async (req, res) => {
     return res.json({ success: false, steps });
   }
 
-  steps.push({ step: 'bot_connect', status: 'starting', serverURL: serverInfo.url });
+  steps.push({ step: 'bot_connect', status: 'starting', serverURL: serverInfo.url, proxy: proxy ? 'yes' : 'no' });
   const bot = new AgarBot('TEST', serverInfo.url, serverInfo.hostname, serverInfo.token, 'feed', serverInfo.fullPath, proxy);
 
   await new Promise(resolve => {
@@ -189,7 +189,7 @@ app.post('/api/start', async (req, res) => {
     let botProxy = null;
     if (userProxies.length > 0) {
       botProxy = userProxies[i % userProxies.length];
-    } else if (proxyPool.length > 0) {
+    } else {
       botProxy = getNextProxy();
     }
     const bot = new AgarBot(
