@@ -147,35 +147,13 @@ app.post('/api/start', async (req, res) => {
   const botNames = names || Array.from({ length: botCount }, (_, i) => `XRD${i + 1}`);
 
   let serverInfo;
-
-  if (serverURL) {
-    const stripped = serverURL.replace(/^wss?:\/\//, '').replace(/:443$/, '');
-    const hasPath = stripped.includes('/');
-
-    if (hasPath) {
-      const hostname = stripped.split('/')[0];
-      serverInfo = { url: `wss://${stripped}`, hostname, token: '', fullPath: stripped };
-      console.log(`[start] full path from client: ${serverInfo.fullPath}`);
-    } else {
-      console.log(`[start] URL has no path (${stripped}), using bouncer`);
-      try {
-        const gm = partyCode ? ':party' : gameMode;
-        serverInfo = await findServer(region, gm, partyCode || undefined);
-        console.log(`[start] bouncer server: ${serverInfo.fullPath}`);
-      } catch (e) {
-        console.log(`[start] bouncer failed: ${e.message}`);
-        return res.status(500).json({ error: `findServer failed: ${e.message}` });
-      }
-    }
-  } else {
-    try {
-      const gm = partyCode ? ':party' : gameMode;
-      serverInfo = await findServer(region, gm, partyCode || undefined);
-      console.log(`[start] bouncer server: ${serverInfo.fullPath} partyCode=${partyCode || 'none'}`);
-    } catch (e) {
-      console.log(`[start] findServer failed: ${e.message}`);
-      return res.status(500).json({ error: `findServer failed: ${e.message}` });
-    }
+  try {
+    const gm = partyCode ? ':party' : gameMode;
+    serverInfo = await findServer(region, gm, partyCode || undefined);
+    console.log(`[start] bouncer: ${serverInfo.fullPath} region=${region} gm=${gm} party=${partyCode || 'none'}`);
+  } catch (e) {
+    console.log(`[start] findServer failed: ${e.message}`);
+    return res.status(500).json({ error: `findServer failed: ${e.message}` });
   }
 
   console.log(`[start] server=${serverInfo.url} host=${serverInfo.hostname}`);

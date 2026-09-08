@@ -39,9 +39,6 @@ class BotEngine: ObservableObject {
     func startBots(config: BotConfiguration) {
         guard !isRunning else { return }
 
-        let ni = NetworkInterceptor.shared
-        let gameServerURL = ni.bestServerURL
-        let serverIP = ni.capturedServerIP
         let modeStr: String
         switch config.botAction {
         case .feedTarget: modeStr = "feed"
@@ -55,8 +52,6 @@ class BotEngine: ObservableObject {
             mode: modeStr,
             targetX: targetX,
             targetY: targetY,
-            gameServerURL: gameServerURL,
-            serverIP: serverIP,
             partyCode: config.partyCode.isEmpty ? nil : config.partyCode,
             region: config.region,
             botKey: config.botKey.isEmpty ? nil : config.botKey

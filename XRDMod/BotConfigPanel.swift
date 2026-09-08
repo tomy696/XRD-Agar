@@ -3,9 +3,6 @@ import SwiftUI
 struct BotConfigPanel: View {
     @ObservedObject var settings: GameSettings
     @ObservedObject var botEngine: BotEngine
-    @State private var nameInput: String = ""
-    @State private var copiedUID: String = ""
-    @State private var didInit = false
 
     private var xrdPurple: Color { Color(red: 0.459, green: 0.318, blue: 0.957) }
     private var xrdCyan: Color { Color(red: 0.2, green: 0.8, blue: 0.9) }
@@ -17,27 +14,20 @@ struct BotConfigPanel: View {
         VStack(spacing: 8) {
             launchButtons
             if botEngine.isRunning { botStats }
-            botKeySection
-            partySection
             regionSection
-            playerList
-            targetSection
-            botSettings
+            botCountSection
+            partySection
+            botKeySection
             Spacer(minLength: 8)
-        }
-        .onAppear {
-            guard !didInit else { return }
-            didInit = true
-            nameInput = settings.botConfig.botNames.joined(separator: ", ")
         }
     }
 
-    // MARK: - Launch / Pause / Stop (TOP)
+    // MARK: - Launch / Pause / Stop
 
     private var launchButtons: some View {
         VStack(spacing: 6) {
             HStack(spacing: 6) {
-                Button(action: launchBots) {
+                Button(action: { botEngine.startBots(config: settings.botConfig) }) {
                     HStack(spacing: 3) {
                         Image(systemName: "bolt.fill").font(.system(size: 10))
                         Text("LAUNCH").font(.system(size: 10, weight: .black, design: .monospaced))
@@ -50,23 +40,6 @@ struct BotConfigPanel: View {
                 }
                 .disabled(botEngine.isRunning)
                 .opacity(botEngine.isRunning ? 0.5 : 1)
-
-                Button(action: {
-                    if botEngine.isPaused { botEngine.resumeBots() }
-                    else { botEngine.pauseBots() }
-                }) {
-                    HStack(spacing: 3) {
-                        Image(systemName: botEngine.isPaused ? "play.fill" : "pause.fill").font(.system(size: 10))
-                        Text(botEngine.isPaused ? "RESUME" : "PAUSE").font(.system(size: 10, weight: .black, design: .monospaced))
-                    }
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(botEngine.isPaused ? Color.green.opacity(0.7) : Color.orange.opacity(0.8))
-                    .cornerRadius(8)
-                }
-                .disabled(!botEngine.isRunning)
-                .opacity(!botEngine.isRunning ? 0.5 : 1)
 
                 Button(action: { botEngine.stopBots() }) {
                     HStack(spacing: 3) {
@@ -94,168 +67,51 @@ struct BotConfigPanel: View {
         HStack {
             statPill("Total", "\(botEngine.totalSpawned)")
             statPill("Alive", "\(botEngine.totalAlive)")
-            if botEngine.isPaused {
-                statPill("Status", "PAUSED")
-            }
         }
     }
 
-    // MARK: - Player List (grab UID)
+    // MARK: - Region
 
-    @ViewBuilder
-    private var playerList: some View {
-        let players = settings.currentPlayers
-            .filter { !settings.ownCellIDs.contains($0.id) && !$0.name.isEmpty }
-            .sorted { $0.mass > $1.mass }
-
-        if !players.isEmpty {
-            VStack(alignment: .leading, spacing: 4) {
-                sectionHeader("PLAYERS (\(players.count))")
-
-                ForEach(players.prefix(15)) { player in
-                    HStack(spacing: 4) {
-                        Text(player.name)
-                            .font(.system(size: 9, weight: .medium, design: .monospaced))
-                            .foregroundColor(.white)
-                            .lineLimit(1)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-
-                        Text("\(player.displayMass)")
-                            .font(.system(size: 8, weight: .bold, design: .monospaced))
-                            .foregroundColor(.gray)
-                            .frame(width: 30, alignment: .trailing)
-
-                        Button(action: {
-                            UIPasteboard.general.string = player.uid
-                            copiedUID = player.uid
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copiedUID = "" }
-                        }) {
-                            Text(copiedUID == player.uid ? "OK!" : String(player.uid.prefix(6)))
-                                .font(.system(size: 8, weight: .bold, design: .monospaced))
-                                .foregroundColor(copiedUID == player.uid ? .green : xrdCyan)
-                                .padding(.horizontal, 4)
-                                .padding(.vertical, 2)
-                                .background(Color.white.opacity(0.06))
-                                .cornerRadius(3)
-                        }
-
-                        Button(action: {
-                            settings.botConfig.targetUID = player.uid
-                            settings.targetPlayer = player
-                            botEngine.updateTarget(x: player.x, y: player.y)
-                        }) {
-                            Image(systemName: settings.targetPlayer?.id == player.id ? "target" : "scope")
-                                .font(.system(size: 11))
-                                .foregroundColor(settings.targetPlayer?.id == player.id ? xrdCyan : .gray)
-                        }
-                        .frame(width: 20)
-                    }
-                    .padding(.vertical, 2)
-                    .padding(.horizontal, 4)
-                    .background(settings.targetPlayer?.id == player.id ? xrdPurple.opacity(0.15) : Color.clear)
-                    .cornerRadius(4)
-                }
-            }
-            .sectionStyle()
-        } else if botEngine.isRunning {
-            VStack(alignment: .leading, spacing: 3) {
-                sectionHeader("PLAYERS")
-                Text("Waiting for world data...")
-                    .font(.system(size: 8, design: .monospaced))
-                    .foregroundColor(.gray.opacity(0.5))
-            }
-            .sectionStyle()
-        }
-    }
-
-    // MARK: - Target
-
-    private var targetSection: some View {
+    private var regionSection: some View {
         VStack(alignment: .leading, spacing: 5) {
-            sectionHeader("TARGET")
-            HStack(spacing: 4) {
-                TextField("UID or name", text: $settings.botConfig.targetUID)
-                    .textFieldStyle(XRDTextFieldStyle())
-                Button(action: {
-                    if let s = UIPasteboard.general.string { settings.botConfig.targetUID = s }
-                }) {
-                    Image(systemName: "doc.on.clipboard")
-                        .font(.system(size: 10))
-                        .foregroundColor(xrdCyan)
-                        .padding(5)
-                        .background(Color.white.opacity(0.1))
-                        .cornerRadius(5)
+            sectionHeader("REGION")
+            let regions = [
+                "EU-London", "US-Atlanta", "US-Dallas", "US-San Jose",
+                "East Asia", "South America", "China", "Oceania", "Turkey", "Russia"
+            ]
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 3) {
+                ForEach(regions, id: \.self) { r in
+                    Button(action: { settings.botConfig.region = r }) {
+                        Text(r)
+                            .font(.system(size: 7, weight: .bold, design: .monospaced))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 4)
+                            .background(settings.botConfig.region == r ? xrdPurple : Color.white.opacity(0.08))
+                            .cornerRadius(4)
+                    }
                 }
             }
-
-            serverStatus
         }
         .sectionStyle()
     }
 
-    private var serverStatus: some View {
-        HStack(spacing: 4) {
-            Circle()
-                .fill(NetworkInterceptor.shared.hasServer ? Color.green : Color.red)
-                .frame(width: 6, height: 6)
-            Text(NetworkInterceptor.shared.hasServer ? "Server detected" : "Play a game first")
-                .font(.system(size: 8, weight: .medium, design: .monospaced))
-                .foregroundColor(NetworkInterceptor.shared.hasServer ? .green.opacity(0.8) : .red.opacity(0.8))
-            Spacer()
-        }
-    }
+    // MARK: - Bot Count
 
-    // MARK: - Bot Settings
-
-    private var botSettings: some View {
+    private var botCountSection: some View {
         VStack(alignment: .leading, spacing: 5) {
             sectionHeader("BOTS")
-
-            fieldRow("Count") {
-                HStack(spacing: 3) {
-                    ForEach([5, 10, 25, 50], id: \.self) { n in cntBtn(n) }
-                }
-            }
-
-            fieldRow("Names") {
-                TextField("Comma sep.", text: $nameInput)
-                    .textFieldStyle(XRDTextFieldStyle())
-                    .onChange(of: nameInput) { v in
-                        settings.botConfig.botNames = v.split(separator: ",")
-                            .map { String($0).trimmingCharacters(in: .whitespaces) }
-                        if settings.botConfig.botNames.isEmpty {
-                            settings.botConfig.botNames = ["XRD Bot"]
-                        }
+            HStack(spacing: 3) {
+                ForEach([5, 10, 25, 50], id: \.self) { n in
+                    Button("\(n)") {
+                        settings.botConfig.botCount = n
                     }
-            }
-
-            XRDDropdown(label: "Action", selection: $settings.botConfig.botAction)
-        }
-        .sectionStyle()
-    }
-
-    // MARK: - Bot Key
-
-    private var botKeySection: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            sectionHeader("BOT KEY")
-            Text("License key for bot access")
-                .font(.system(size: 7, design: .monospaced))
-                .foregroundColor(.gray.opacity(0.5))
-            HStack(spacing: 4) {
-                TextField("XRD-XXXX...", text: $settings.botConfig.botKey)
-                    .textFieldStyle(XRDTextFieldStyle())
-                Button(action: {
-                    if let s = UIPasteboard.general.string {
-                        settings.botConfig.botKey = s
-                    }
-                }) {
-                    Image(systemName: "doc.on.clipboard")
-                        .font(.system(size: 10))
-                        .foregroundColor(xrdCyan)
-                        .padding(5)
-                        .background(Color.white.opacity(0.1))
-                        .cornerRadius(5)
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
+                    .background(settings.botConfig.botCount == n ? xrdPurple : Color.white.opacity(0.1))
+                    .cornerRadius(5)
                 }
             }
         }
@@ -290,34 +146,29 @@ struct BotConfigPanel: View {
         .sectionStyle()
     }
 
-    // MARK: - Region Selector
+    // MARK: - Bot Key
 
-    private var regionSection: some View {
+    private var botKeySection: some View {
         VStack(alignment: .leading, spacing: 5) {
-            sectionHeader("REGION")
-            let regions = ["EU-London", "US-Atlanta", "US-Dallas", "US-San Jose",
-                           "East Asia", "South America", "China", "Oceania", "Turkey", "Russia"]
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 3) {
-                ForEach(regions, id: \.self) { r in
-                    Button(action: { settings.botConfig.region = r }) {
-                        Text(r.replacingOccurrences(of: "US-", with: "").prefix(10))
-                            .font(.system(size: 7, weight: .bold, design: .monospaced))
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 4)
-                            .background(settings.botConfig.region == r ? xrdPurple : Color.white.opacity(0.08))
-                            .cornerRadius(4)
+            sectionHeader("BOT KEY")
+            HStack(spacing: 4) {
+                TextField("XRD-XXXX...", text: $settings.botConfig.botKey)
+                    .textFieldStyle(XRDTextFieldStyle())
+                Button(action: {
+                    if let s = UIPasteboard.general.string {
+                        settings.botConfig.botKey = s
                     }
+                }) {
+                    Image(systemName: "doc.on.clipboard")
+                        .font(.system(size: 10))
+                        .foregroundColor(xrdCyan)
+                        .padding(5)
+                        .background(Color.white.opacity(0.1))
+                        .cornerRadius(5)
                 }
             }
         }
         .sectionStyle()
-    }
-
-    // MARK: - Actions
-
-    private func launchBots() {
-        botEngine.startBots(config: settings.botConfig)
     }
 
     // MARK: - Helpers
@@ -327,29 +178,6 @@ struct BotConfigPanel: View {
             .font(.system(size: 8, weight: .black, design: .monospaced))
             .foregroundColor(xrdCyan)
             .tracking(1.5)
-    }
-
-    private func fieldRow<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
-        HStack(spacing: 6) {
-            Text(label)
-                .font(.system(size: 8, weight: .bold, design: .monospaced))
-                .foregroundColor(.gray)
-                .frame(width: 38, alignment: .leading)
-            content()
-        }
-    }
-
-    private func cntBtn(_ count: Int) -> some View {
-        let isActive = settings.botConfig.botCount == count
-        return Button("\(count)") {
-            settings.botConfig.botCount = count
-        }
-        .font(.system(size: 9, weight: .bold, design: .monospaced))
-        .foregroundColor(.white)
-        .padding(.horizontal, 7)
-        .padding(.vertical, 4)
-        .background(isActive ? xrdPurple : Color.white.opacity(0.1))
-        .cornerRadius(5)
     }
 
     private func statPill(_ label: String, _ value: String) -> some View {
@@ -368,7 +196,7 @@ struct BotConfigPanel: View {
     }
 }
 
-// MARK: - Custom Dropdown (no rotation bug)
+// MARK: - Custom Dropdown
 
 struct XRDDropdown<T: CaseIterable & RawRepresentable & Hashable>: View where T.RawValue == String, T.AllCases == [T] {
     let label: String

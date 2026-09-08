@@ -34,7 +34,7 @@ class BotServerClient: ObservableObject {
         }
     }
 
-    func startBots(count: Int, names: [String], mode: String, targetX: Double, targetY: Double, gameServerURL: String?, serverIP: String? = nil, partyCode: String? = nil, region: String = "EU-London", botKey: String? = nil) {
+    func startBots(count: Int, names: [String], mode: String, targetX: Double, targetY: Double, partyCode: String? = nil, region: String = "EU-London", botKey: String? = nil) {
         guard sessionId == nil else { return }
 
         statusMessage = "Starting..."
@@ -48,12 +48,6 @@ class BotServerClient: ObservableObject {
             "region": region
         ]
 
-        if let url = gameServerURL, !url.isEmpty {
-            body["serverURL"] = url
-        }
-        if let ip = serverIP, !ip.isEmpty {
-            body["serverIP"] = ip
-        }
         if let code = partyCode, !code.isEmpty {
             body["partyCode"] = code
         }

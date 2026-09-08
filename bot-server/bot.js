@@ -72,13 +72,17 @@ class AgarBot {
         handshakeTimeout: 10000
       };
       if (this.proxy) {
-        const isSocks = this.proxy.startsWith('socks');
-        if (isSocks && SocksProxyAgent) {
-          wsOpts.agent = new SocksProxyAgent(this.proxy);
-        } else if (!isSocks && HttpsProxyAgent) {
-          wsOpts.agent = new HttpsProxyAgent(this.proxy);
+        try {
+          const isSocks = this.proxy.startsWith('socks');
+          if (isSocks && SocksProxyAgent) {
+            wsOpts.agent = new SocksProxyAgent(this.proxy);
+          } else if (!isSocks && HttpsProxyAgent) {
+            wsOpts.agent = new HttpsProxyAgent(this.proxy);
+          }
+          this.addLog(`using proxy (${isSocks ? 'socks' : 'http'}): ${this.proxy.replace(/:[^:@]+@/, ':***@')}`);
+        } catch (e) {
+          this.addLog(`proxy agent failed, connecting direct: ${e.message}`);
         }
-        this.addLog(`using proxy (${isSocks ? 'socks' : 'http'}): ${this.proxy.replace(/:[^:@]+@/, ':***@')}`);
       }
       this.ws = new WebSocket(this.serverURL, wsOpts);
     } catch (e) {
@@ -109,6 +113,15 @@ class AgarBot {
     this.ws.on('error', (err) => {
       this.addLog(`WS error: ${err.message}`);
       this.lastError = err.message;
+      if (this.proxy && !this.retriedWithoutProxy) {
+        this.addLog('retrying without proxy...');
+        this.retriedWithoutProxy = true;
+        this.proxy = null;
+        if (this.ws) { try { this.ws.close(); } catch(e){} this.ws = null; }
+        this.state = 'idle';
+        this.connect();
+        return;
+      }
       this.disconnect();
     });
 
