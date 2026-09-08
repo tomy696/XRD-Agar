@@ -130,35 +130,21 @@ app.post('/api/start', async (req, res) => {
     if (hasPath) {
       const hostname = stripped.split('/')[0];
       serverInfo = { url: `wss://${stripped}`, hostname, token: '', fullPath: stripped };
-      console.log(`[start] full path provided: ${serverInfo.url} fullPath=${serverInfo.fullPath}`);
+      console.log(`[start] full path from client: ${serverInfo.fullPath}`);
     } else {
-      console.log(`[start] URL has no path (${stripped}), need to resolve fullPath`);
+      console.log(`[start] URL has no path (${stripped}), using bouncer directly`);
       try {
-        const bouncerInfo = await findServer(region, gameMode);
-        const bouncerPath = bouncerInfo.fullPath;
-        const pathParts = bouncerPath.split('/');
-        const bouncerHostname = pathParts[0];
-        const bouncerRegion = pathParts[1];
-
-        const userHostname = stripped.split(':')[0];
-        const ipForPath = serverIP ? serverIP.replace(/\./g, '-') : null;
-
-        if (ipForPath && bouncerRegion) {
-          const reconstructed = `${userHostname}/${bouncerRegion}/${ipForPath}`;
-          serverInfo = { url: `wss://${reconstructed}`, hostname: userHostname, token: '', fullPath: reconstructed };
-          console.log(`[start] reconstructed fullPath: ${reconstructed}`);
-        } else {
-          serverInfo = bouncerInfo;
-          console.log(`[start] using bouncer server: ${serverInfo.fullPath}`);
-        }
+        serverInfo = await findServer(region, gameMode);
+        console.log(`[start] bouncer server: ${serverInfo.fullPath}`);
       } catch (e) {
-        console.log(`[start] bouncer failed, using raw URL: ${stripped}`);
-        serverInfo = { url: `wss://${stripped}`, hostname: stripped.split(':')[0], token: '', fullPath: stripped };
+        console.log(`[start] bouncer failed: ${e.message}`);
+        return res.status(500).json({ error: `findServer failed: ${e.message}` });
       }
     }
   } else {
     try {
       serverInfo = await findServer(region, gameMode);
+      console.log(`[start] no URL provided, bouncer server: ${serverInfo.fullPath}`);
     } catch (e) {
       console.log(`[start] findServer failed: ${e.message}`);
       return res.status(500).json({ error: `findServer failed: ${e.message}` });
