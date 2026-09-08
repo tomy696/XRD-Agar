@@ -203,6 +203,10 @@ app.post('/api/start', async (req, res) => {
       botOptions
     );
     bot.setTarget(targetX, targetY);
+    bot.onReconnect = () => {
+      if (userProxies.length > 0) return userProxies[Math.floor(Math.random() * userProxies.length)];
+      return getNextProxy();
+    };
     bots.push(bot);
   }
 
@@ -216,7 +220,7 @@ app.post('/api/start', async (req, res) => {
   });
 
   for (let i = 0; i < bots.length; i++) {
-    setTimeout(() => bots[i].connect(), i * 1500);
+    setTimeout(() => bots[i].connect(), i * 2000);
   }
 
   const response = {

@@ -47,6 +47,10 @@ class AgarBot {
     this.feedTickCount = 0;
     this.virusTargetX = 0;
     this.virusTargetY = 0;
+    this.captchaCount = 0;
+    this.reconnectCount = 0;
+    this.maxReconnects = 5;
+    this.onReconnect = null;
   }
 
   addLog(msg) {
@@ -121,16 +125,7 @@ class AgarBot {
     this.ws.on('error', (err) => {
       this.addLog(`WS error: ${err.message}`);
       this.lastError = err.message;
-      if (this.proxy && !this.retriedWithoutProxy) {
-        this.addLog('retrying without proxy...');
-        this.retriedWithoutProxy = true;
-        this.proxy = null;
-        if (this.ws) { try { this.ws.close(); } catch(e){} this.ws = null; }
-        this.state = 'idle';
-        this.connect();
-        return;
-      }
-      this.disconnect();
+      this.reconnectWithNewIP();
     });
 
     this.ws.on('ping', () => {
@@ -197,7 +192,12 @@ class AgarBot {
     }
 
     if (op === 0xF2) {
-      this.addLog(`CAPTCHA_REQUEST (0xF2) — ignoring`);
+      this.captchaCount++;
+      this.addLog(`CAPTCHA (0xF2) #${this.captchaCount}`);
+      if (this.captchaCount >= 3) {
+        this.addLog('too many captchas, reconnecting with new IP...');
+        this.reconnectWithNewIP();
+      }
       return;
     }
 
@@ -233,7 +233,12 @@ class AgarBot {
         break;
 
       case 'captcha':
-        this.addLog('CAPTCHA (0x55)');
+        this.captchaCount++;
+        this.addLog(`CAPTCHA (0x55) #${this.captchaCount}`);
+        if (this.captchaCount >= 3) {
+          this.addLog('too many captchas, reconnecting with new IP...');
+          this.reconnectWithNewIP();
+        }
         break;
 
       case 'ack':
@@ -481,6 +486,34 @@ class AgarBot {
     setTimeout(() => {
       if (this.state === 'dead') this.trySpawn();
     }, this.respawnCount > 10 ? 3000 : 1000);
+  }
+
+  reconnectWithNewIP() {
+    this.reconnectCount++;
+    if (this.reconnectCount > this.maxReconnects) {
+      this.addLog(`max reconnects (${this.maxReconnects}) reached`);
+      this.lastError = 'max reconnects';
+      this.disconnect();
+      return;
+    }
+    if (this.moveInterval) { clearInterval(this.moveInterval); this.moveInterval = null; }
+    if (this.ws) { try { this.ws.close(); } catch(e){} this.ws = null; }
+    this.state = 'idle';
+    this.ownIDs = [];
+    this.cells.clear();
+    this.handshakeComplete = false;
+    this.captchaCount = 0;
+    this.spawnAttempts = 0;
+
+    if (this.onReconnect) {
+      this.proxy = this.onReconnect();
+      this.addLog(`reconnect #${this.reconnectCount} new proxy`);
+    }
+
+    const delay = 1000 + Math.random() * 2000;
+    setTimeout(() => {
+      if (this.state === 'idle') this.connect();
+    }, delay);
   }
 
   setTarget(x, y) {
