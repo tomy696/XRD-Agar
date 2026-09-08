@@ -14,7 +14,7 @@ class BotServerClient: ObservableObject {
 
     private var pollTimer: Timer?
     private let session = URLSession(configuration: .ephemeral)
-    private let defaultURL = "https://xrd-bot-server.up.railway.app"
+    private let defaultURL = "https://xrd-agar-production.up.railway.app"
 
     var baseURL: String {
         let url = serverBotURL.trimmingCharacters(in: .whitespacesAndNewlines)
