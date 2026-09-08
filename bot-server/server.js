@@ -8,7 +8,16 @@ app.use(express.json());
 
 const sessions = new Map();
 const botKeys = new Map();
+const proxyPool = [];
+let proxyIndex = 0;
 let sessionCounter = 0;
+
+function getNextProxy() {
+  if (proxyPool.length === 0) return null;
+  const proxy = proxyPool[proxyIndex % proxyPool.length];
+  proxyIndex++;
+  return proxy;
+}
 
 const WEB_BOUNCER = 'webbouncer-live-v8-0.agario.miniclippt.com';
 const CLIENT_VERSION_INT = '31129';
@@ -170,10 +179,15 @@ app.post('/api/start', async (req, res) => {
   const sessionId = `s${sessionCounter}_${Date.now().toString(36)}`;
   const bots = [];
 
-  const proxyList = proxies || (proxy ? [proxy] : []);
+  const userProxies = proxies || (proxy ? [proxy] : []);
 
   for (let i = 0; i < botCount; i++) {
-    const botProxy = proxyList.length > 0 ? proxyList[i % proxyList.length] : null;
+    let botProxy = null;
+    if (userProxies.length > 0) {
+      botProxy = userProxies[i % userProxies.length];
+    } else if (proxyPool.length > 0) {
+      botProxy = getNextProxy();
+    }
     const bot = new AgarBot(
       botNames[i % botNames.length],
       serverInfo.url,
@@ -377,6 +391,77 @@ app.get('/api/keys/list', (req, res) => {
     list.push({ hash: hash.substring(0, 8) + '...', ...entry, expired: Date.now() > entry.expiresAt });
   }
   res.json({ keys: list });
+});
+
+// Proxy management
+app.post('/api/proxies/add', (req, res) => {
+  const { adminKey, proxies: newProxies } = req.body;
+  if (adminKey !== ADMIN_SECRET) return res.status(403).json({ error: 'unauthorized' });
+  if (!Array.isArray(newProxies)) return res.status(400).json({ error: 'proxies must be array' });
+
+  let added = 0;
+  for (const p of newProxies) {
+    const trimmed = p.trim();
+    if (trimmed && !proxyPool.includes(trimmed)) {
+      proxyPool.push(trimmed);
+      added++;
+    }
+  }
+  console.log(`[proxies] added ${added}, total: ${proxyPool.length}`);
+  res.json({ added, total: proxyPool.length });
+});
+
+app.post('/api/proxies/remove', (req, res) => {
+  const { adminKey, proxy: toRemove } = req.body;
+  if (adminKey !== ADMIN_SECRET) return res.status(403).json({ error: 'unauthorized' });
+
+  const idx = proxyPool.indexOf(toRemove);
+  if (idx !== -1) {
+    proxyPool.splice(idx, 1);
+    res.json({ removed: true, total: proxyPool.length });
+  } else {
+    res.status(404).json({ error: 'proxy not found' });
+  }
+});
+
+app.post('/api/proxies/clear', (req, res) => {
+  const { adminKey } = req.body;
+  if (adminKey !== ADMIN_SECRET) return res.status(403).json({ error: 'unauthorized' });
+  proxyPool.length = 0;
+  proxyIndex = 0;
+  res.json({ status: 'cleared' });
+});
+
+app.get('/api/proxies/list', (req, res) => {
+  const { adminKey } = req.query;
+  if (adminKey !== ADMIN_SECRET) return res.status(403).json({ error: 'unauthorized' });
+  res.json({ proxies: proxyPool, total: proxyPool.length, currentIndex: proxyIndex });
+});
+
+app.post('/api/proxies/test', async (req, res) => {
+  const { adminKey, proxy: testProxy } = req.body;
+  if (adminKey !== ADMIN_SECRET) return res.status(403).json({ error: 'unauthorized' });
+
+  let SocksProxyAgent;
+  try { SocksProxyAgent = require('socks-proxy-agent').SocksProxyAgent; } catch(e) {
+    return res.status(500).json({ error: 'socks-proxy-agent not installed' });
+  }
+
+  try {
+    const agent = new SocksProxyAgent(testProxy);
+    const start = Date.now();
+    const result = await new Promise((resolve, reject) => {
+      const req = https.request({ hostname: 'agar.io', port: 443, path: '/', method: 'HEAD', agent, timeout: 10000 }, (r) => {
+        resolve({ status: r.statusCode, latency: Date.now() - start });
+      });
+      req.on('error', reject);
+      req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+      req.end();
+    });
+    res.json({ working: true, ...result, proxy: testProxy });
+  } catch (e) {
+    res.json({ working: false, error: e.message, proxy: testProxy });
+  }
 });
 
 setInterval(() => {
