@@ -8,7 +8,6 @@ class BotEngine: ObservableObject {
     @Published var totalSpawned: Int = 0
     @Published var totalAlive: Int = 0
 
-    weak var settings: GameSettings?
     let client = BotServerClient.shared
 
     private var cancellables = Set<AnyCancellable>()
