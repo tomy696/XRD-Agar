@@ -23,7 +23,7 @@ class BotEngine: ObservableObject {
         isRunning = true
         statusMessage = "Resolving..."
 
-        ServerResolver.resolveServer(partyCode: config.partyCode) { [weak self] result in
+        ServerResolver.resolveServer { [weak self] result in
             DispatchQueue.main.async {
                 switch result {
                 case .success(let info):
@@ -91,8 +91,7 @@ class BotEngine: ObservableObject {
 
                 let bot = AgarBot(
                     name: names[i % names.count],
-                    serverIP: serverInfo.ip,
-                    serverPort: serverInfo.port,
+                    serverURL: serverInfo.url,
                     serverHostname: serverInfo.hostname,
                     serverToken: serverInfo.token,
                     action: config.botAction

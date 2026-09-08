@@ -342,7 +342,7 @@ class XRDOverlay: NSObject {
         L.append("Bots.lastURL: \(botEngine.lastResolvedURL ?? "none")")
         L.append("Bots.capturedIP: \(ni.capturedServerIP ?? "none"):\(ni.capturedServerPort ?? 0)")
         for (i, bot) in botEngine.bots.prefix(5).enumerated() {
-            L.append("  Bot[\(i)]: \(bot.state) mode=\(bot.connMode) ip=\(bot.serverIP):\(bot.serverPort) err=\(bot.lastError)")
+            L.append("  Bot[\(i)]: \(bot.state) mode=\(bot.connMode) host=\(bot.serverHostname) pkts=\(bot.serverPacketCount) err=\(bot.lastError)")
         }
         L.append("Bots.log(\(AgarBot.recentLog.count)):")
         for entry in AgarBot.recentLog.suffix(20) { L.append("  \(entry)") }

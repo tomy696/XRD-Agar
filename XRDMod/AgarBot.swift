@@ -10,8 +10,7 @@ protocol AgarBotDelegate: AnyObject {
 class AgarBot: NSObject, Identifiable, URLSessionWebSocketDelegate {
     let id = UUID()
     let name: String
-    let serverIP: String
-    let serverPort: Int
+    let serverURL: String
     let serverHostname: String
     let serverToken: String
     let action: BotAction
@@ -57,10 +56,9 @@ class AgarBot: NSObject, Identifiable, URLSessionWebSocketDelegate {
     private var serverVersion: String = ""
     private var handshakeComplete = false
 
-    init(name: String, serverIP: String, serverPort: Int, serverHostname: String, serverToken: String, action: BotAction) {
+    init(name: String, serverURL: String, serverHostname: String, serverToken: String, action: BotAction) {
         self.name = name
-        self.serverIP = serverIP
-        self.serverPort = serverPort
+        self.serverURL = serverURL
         self.serverHostname = serverHostname
         self.serverToken = serverToken
         self.action = action
@@ -69,16 +67,6 @@ class AgarBot: NSObject, Identifiable, URLSessionWebSocketDelegate {
 
     deinit {
         cleanup()
-    }
-
-    private var connectHost: String {
-        if !serverHostname.isEmpty {
-            return serverHostname
-        }
-        if !serverIP.isEmpty {
-            return serverIP
-        }
-        return ServerResolver.webBouncer
     }
 
     // MARK: - Connection
@@ -93,32 +81,16 @@ class AgarBot: NSObject, Identifiable, URLSessionWebSocketDelegate {
         serverVersion = ""
         handshakeComplete = false
         serverPacketCount = 0
-        triedTLS = false
-        triedPlain = false
 
-        connectWebSocket(useTLS: true)
-    }
-
-    private var triedTLS = false
-    private var triedPlain = false
-
-    private func connectWebSocket(useTLS: Bool) {
-        guard !cancelled else { return }
-
-        if useTLS { triedTLS = true } else { triedPlain = true }
-        connMode = useTLS ? "wss" : "ws"
-
-        let scheme = useTLS ? "wss" : "ws"
-        let host = connectHost
-
-        guard let url = URL(string: "\(scheme)://\(host):\(serverPort)") else {
-            AgarBot.log("[\(name)] invalid URL")
+        guard let url = URL(string: serverURL) else {
+            AgarBot.log("[\(name)] invalid URL: \(serverURL)")
             lastError = "invalid URL"
             state = .disconnected
             return
         }
 
-        AgarBot.log("[\(name)] connecting \(url.absoluteString)")
+        connMode = "wss"
+        AgarBot.log("[\(name)] connecting \(serverURL)")
 
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 12
@@ -139,19 +111,9 @@ class AgarBot: NSObject, Identifiable, URLSessionWebSocketDelegate {
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 10.0) { [weak self] in
             guard let self = self, !self.cancelled, self.state == .connecting else { return }
-            AgarBot.log("[\(self.name)] \(self.connMode) timeout")
-            self.webSocketTask?.cancel(with: .goingAway, reason: nil)
-            self.webSocketTask = nil
-            self.urlSession?.invalidateAndCancel()
-            self.urlSession = nil
-            let canFallback = useTLS ? !self.triedPlain : !self.triedTLS
-            if canFallback {
-                AgarBot.log("[\(self.name)] trying \(useTLS ? "ws" : "wss")://")
-                self.connectWebSocket(useTLS: !useTLS)
-            } else {
-                self.lastError = "connection timeout"
-                self.disconnect()
-            }
+            AgarBot.log("[\(self.name)] connection timeout")
+            self.lastError = "connection timeout"
+            self.disconnect()
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 14.0) { [weak self] in
@@ -167,7 +129,7 @@ class AgarBot: NSObject, Identifiable, URLSessionWebSocketDelegate {
 
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol proto: String?) {
         guard !cancelled else { return }
-        AgarBot.log("[\(name)] \(connMode) connected to \(connectHost):\(serverPort)")
+        AgarBot.log("[\(name)] WS OPEN \(serverHostname)")
         state = .connected
         sendGameHandshake()
     }
@@ -194,18 +156,12 @@ class AgarBot: NSObject, Identifiable, URLSessionWebSocketDelegate {
         let nsError = error as NSError
         if nsError.code == NSURLErrorCancelled { return }
 
-        AgarBot.log("[\(name)] \(connMode) error: \(error.localizedDescription)")
+        AgarBot.log("[\(name)] error: \(error.localizedDescription)")
+        lastError = error.localizedDescription
         webSocketTask = nil
         urlSession?.invalidateAndCancel()
         urlSession = nil
-
-        let usedTLS = connMode == "wss"
-        let canFallback = usedTLS ? !triedPlain : !triedTLS
-        if canFallback && state == .connecting {
-            AgarBot.log("[\(name)] trying \(usedTLS ? "ws" : "wss")://")
-            connectWebSocket(useTLS: !usedTLS)
-        } else if state != .disconnected {
-            lastError = error.localizedDescription
+        if state != .disconnected {
             disconnect()
         }
     }
@@ -245,10 +201,7 @@ class AgarBot: NSObject, Identifiable, URLSessionWebSocketDelegate {
         let vi = AgarProtocol.versionIntPacket()
         gameSend(hs)
         gameSend(vi)
-        let hsHex = hs.map { String(format: "%02x", $0) }.joined(separator: " ")
-        let viHex = vi.map { String(format: "%02x", $0) }.joined(separator: " ")
-        let vInt = AgarProtocol.versionStringToInt(AgarProtocol.clientVersion)
-        AgarBot.log("[\(name)] handshake=[\(hsHex)] verInt=[\(viHex)] (\(vInt))")
+        AgarBot.log("[\(name)] handshake sent proto=\(AgarProtocol.protocolVersion) ver=\(AgarProtocol.clientVersion)")
         if !serverToken.isEmpty {
             gameSend(AgarProtocol.facebookTokenPacket(token: serverToken))
             AgarBot.log("[\(name)] token sent (\(serverToken.count) chars)")
@@ -327,10 +280,9 @@ class AgarBot: NSObject, Identifiable, URLSessionWebSocketDelegate {
             serverVersion = ver
             let versionInt = AgarProtocol.versionStringToInt(AgarProtocol.clientVersion)
             decryptionKey = mk ^ versionInt
-            let host = connectHost
-            encryptionKey = AgarProtocol.murmur2("\(host)\(ver)", seed: 255)
+            encryptionKey = AgarProtocol.murmur2("\(serverHostname)\(ver)", seed: 255)
             handshakeComplete = true
-            AgarBot.log("[\(name)] F1 mk=\(mk) dk=\(decryptionKey) ek=\(encryptionKey) ver=\"\(ver)\" host=\(host)")
+            AgarBot.log("[\(name)] F1 mk=\(mk) dk=\(decryptionKey) ek=\(encryptionKey) ver=\"\(ver)\" host=\(serverHostname)")
             spawn()
 
         case .outdatedVersion:
