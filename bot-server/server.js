@@ -12,7 +12,12 @@ const proxyPool = [];
 let proxyIndex = 0;
 let sessionCounter = 0;
 
+// Rotating proxy gateway: one URL, each connection = different IP
+// Set via Railway env var: PROXY_GATEWAY=socks5://user:pass@gateway:port
+const PROXY_GATEWAY = process.env.PROXY_GATEWAY || '';
+
 function getNextProxy() {
+  if (PROXY_GATEWAY) return PROXY_GATEWAY;
   if (proxyPool.length === 0) return null;
   const proxy = proxyPool[proxyIndex % proxyPool.length];
   proxyIndex++;
@@ -435,7 +440,20 @@ app.post('/api/proxies/clear', (req, res) => {
 app.get('/api/proxies/list', (req, res) => {
   const { adminKey } = req.query;
   if (adminKey !== ADMIN_SECRET) return res.status(403).json({ error: 'unauthorized' });
-  res.json({ proxies: proxyPool, total: proxyPool.length, currentIndex: proxyIndex });
+  res.json({ gateway: PROXY_GATEWAY || null, proxies: proxyPool, total: proxyPool.length, currentIndex: proxyIndex });
+});
+
+app.post('/api/proxies/set-gateway', (req, res) => {
+  const { adminKey, gateway } = req.body;
+  if (adminKey !== ADMIN_SECRET) return res.status(403).json({ error: 'unauthorized' });
+  // Can't change env var at runtime, but we can override via pool
+  // If gateway is set, all bots use it. Clear pool to use gateway only.
+  if (gateway) {
+    proxyPool.length = 0;
+    proxyPool.push(gateway);
+    console.log(`[proxies] gateway set: ${gateway}`);
+  }
+  res.json({ status: 'ok', gateway, total: proxyPool.length });
 });
 
 app.post('/api/proxies/test', async (req, res) => {
