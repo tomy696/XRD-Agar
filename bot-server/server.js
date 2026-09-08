@@ -134,7 +134,7 @@ app.get('/api/test', async (req, res) => {
 });
 
 app.post('/api/start', async (req, res) => {
-  const { count = 5, names, mode = 'feed', region = 'EU-London', gameMode = ':ffa', targetX = 0, targetY = 0, serverURL, serverIP, proxy, proxies, partyCode, botKey } = req.body;
+  const { count = 5, names, mode = 'follow', region = 'EU-London', gameMode = ':ffa', targetX = 0, targetY = 0, proxy, proxies, partyCode, botKey, tripleMass = false, boosterMode = false, feedtrackMode = false, targetUID = '', botSkin = '' } = req.body;
 
   let maxAllowed = 50;
   if (botKey) {
@@ -176,13 +176,14 @@ app.post('/api/start', async (req, res) => {
     }
   }
 
-  console.log(`[start] server=${serverInfo.url} host=${serverInfo.hostname}`);
+  console.log(`[start] server=${serverInfo.url} host=${serverInfo.hostname} mode=${mode} triple=${tripleMass} booster=${boosterMode} feedtrack=${feedtrackMode}`);
 
   sessionCounter++;
   const sessionId = `s${sessionCounter}_${Date.now().toString(36)}`;
   const bots = [];
 
   const userProxies = proxies || (proxy ? [proxy] : []);
+  const botOptions = { tripleMass, boosterMode, feedtrackMode };
 
   for (let i = 0; i < botCount; i++) {
     let botProxy = null;
@@ -198,7 +199,8 @@ app.post('/api/start', async (req, res) => {
       serverInfo.token,
       mode,
       serverInfo.fullPath,
-      botProxy
+      botProxy,
+      botOptions
     );
     bot.setTarget(targetX, targetY);
     bots.push(bot);

@@ -410,16 +410,20 @@ class AgarBot: NSObject, Identifiable, URLSessionWebSocketDelegate {
     private func performAction() {
         guard isAlive else { return }
         switch action {
-        case .feedTarget:
+        case .followPlayer:
             moveToTarget()
             gameSend(AgarProtocol.ejectMassPacket())
-        case .suicide:
+        case .makeVirus:
+            moveToTarget()
+            gameSend(AgarProtocol.ejectMassPacket())
+        case .breakVirus:
             moveToTarget()
             gameSend(AgarProtocol.splitPacket())
-        case .feedEverywhere:
-            let rx = Double.random(in: worldBorder.minX...worldBorder.maxX)
-            let ry = Double.random(in: worldBorder.minY...worldBorder.maxY)
-            gameSend(AgarProtocol.movePacket(x: rx, y: ry, movementKey: movementKey))
+        case .feedLeave:
+            moveToTarget()
+            gameSend(AgarProtocol.ejectMassPacket())
+        case .smartAFK:
+            moveToTarget()
             gameSend(AgarProtocol.ejectMassPacket())
         }
     }

@@ -9,13 +9,13 @@ const PROTOCOL_VERSION = 23;
 const VERSION_INT = proto.versionToInt(CLIENT_VERSION);
 
 class AgarBot {
-  constructor(name, serverURL, hostname, token, mode, fullPath, proxy) {
+  constructor(name, serverURL, hostname, token, mode, fullPath, proxy, options = {}) {
     this.name = name;
     this.serverURL = serverURL;
     this.hostname = hostname;
     this.fullPath = fullPath || hostname;
     this.token = token || '';
-    this.mode = mode || 'feed';
+    this.mode = mode || 'follow';
     this.state = 'idle';
     this.ws = null;
     this.ownIDs = [];
@@ -39,6 +39,14 @@ class AgarBot {
     this.f1Raw = null;
     this.paused = false;
     this.proxy = proxy || null;
+
+    this.tripleMass = options.tripleMass || false;
+    this.boosterMode = options.boosterMode || false;
+    this.feedtrackMode = options.feedtrackMode || false;
+
+    this.feedTickCount = 0;
+    this.virusTargetX = 0;
+    this.virusTargetY = 0;
   }
 
   addLog(msg) {
@@ -184,19 +192,20 @@ class AgarBot {
     const op = decoded[0];
 
     if (op === 0xE2) {
-      this.addLog(`PING received (0xE2) len=${decoded.length}`);
       this.sendPong(decoded);
       return;
     }
 
     if (op === 0xF2) {
-      this.addLog(`CAPTCHA_REQUEST (0xF2) len=${decoded.length} — ignoring, will retry spawn`);
+      this.addLog(`CAPTCHA_REQUEST (0xF2) — ignoring`);
       return;
     }
 
     const pkt = proto.parsePacket(decoded);
     if (!pkt) {
-      this.addLog(`UNKNOWN pkt#${this.packetCount} op=0x${op.toString(16)} (${op}) len=${decoded.length} hex=[${decoded.slice(0, 30).toString('hex')}]`);
+      if (this.packetCount <= 10) {
+        this.addLog(`UNKNOWN op=0x${op.toString(16)} len=${decoded.length}`);
+      }
       return;
     }
 
@@ -207,28 +216,27 @@ class AgarBot {
         this.decryptionKey = (pkt.movementKey ^ VERSION_INT) >>> 0;
         this.encryptionKey = proto.murmur2(this.fullPath + pkt.ver, 255);
         this.handshakeComplete = true;
-        this.addLog(`F1 mk=${pkt.movementKey} dk=${this.decryptionKey} ek=${this.encryptionKey} ver="${pkt.ver}" path="${this.fullPath}"`);
+        this.addLog(`F1 mk=${pkt.movementKey} dk=${this.decryptionKey} ek=${this.encryptionKey} ver="${pkt.ver}"`);
         this.trySpawn();
         break;
 
       case 'outdated':
-        this.addLog('OUTDATED client version rejected');
+        this.addLog('OUTDATED version');
         this.lastError = 'version outdated';
         this.disconnect();
         break;
 
       case 'protoError':
-        this.addLog('PROTO_ERROR protocol rejected');
+        this.addLog('PROTO_ERROR');
         this.lastError = 'protocol rejected';
         this.disconnect();
         break;
 
       case 'captcha':
-        this.addLog('CAPTCHA requested (0x55) — not disconnecting, will keep trying');
+        this.addLog('CAPTCHA (0x55)');
         break;
 
       case 'ack':
-        this.addLog('ACK received');
         break;
 
       case 'worldUpdate':
@@ -237,10 +245,6 @@ class AgarBot {
         for (const e of pkt.eats) {
           this.cells.delete(e.eaten);
           this.ownIDs = this.ownIDs.filter(id => id !== e.eaten);
-        }
-
-        if (this.packetCount <= 8 || this.packetCount % 100 === 0) {
-          this.addLog(`worldUpdate: ${pkt.updates.length} updates, ${pkt.removals.length} removals, ${pkt.eats.length} eats, cells=${this.cells.size}`);
         }
 
         if (this.state === 'alive' && this.ownIDs.length === 0) {
@@ -272,14 +276,12 @@ class AgarBot {
 
       case 'clearAll':
         this.cells.clear();
-        this.addLog('clearAll');
         break;
 
       case 'leaderboard':
         break;
 
       case 'unknown':
-        this.addLog(`unknown pkt op=0x${pkt.op.toString(16)} (${pkt.op}) len=${pkt.len} hex=[${decoded.slice(0, 30).toString('hex')}]`);
         if (pkt.len === 33) {
           try {
             const buf = decoded;
@@ -290,7 +292,6 @@ class AgarBot {
             if (Math.abs(minX) < 50000 && maxX > minX && maxY > minY) {
               this.worldBorder = { minX, minY, maxX, maxY };
               this.gotWorldBorder = true;
-              this.addLog(`heuristic worldBorder: ${minX.toFixed(0)},${minY.toFixed(0)} to ${maxX.toFixed(0)},${maxY.toFixed(0)}`);
               if (this.state !== 'alive') {
                 setTimeout(() => this.trySpawn(), 300);
               }
@@ -307,11 +308,8 @@ class AgarBot {
       pingData.copy(pong);
       pong[0] = 0xE3;
       this.gameSend(pong);
-      this.addLog(`PONG sent (0xE3) len=${pong.length}`);
     } else {
-      const pong = Buffer.from([0xE3]);
-      this.gameSend(pong);
-      this.addLog('PONG sent (0xE3) 1 byte');
+      this.gameSend(Buffer.from([0xE3]));
     }
   }
 
@@ -320,15 +318,12 @@ class AgarBot {
     this.spawnAttempts++;
     this.state = 'spawning';
     const pkt = proto.spawnPacket(this.name);
-    this.addLog(`SPAWN attempt #${this.spawnAttempts} name="${this.name}" pktLen=${pkt.length} pktHex=[${pkt.toString('hex')}]`);
+    this.addLog(`SPAWN #${this.spawnAttempts} name="${this.name}"`);
     this.gameSend(pkt);
 
     if (this.spawnAttempts < 5) {
       setTimeout(() => {
-        if (this.state === 'spawning') {
-          this.addLog(`spawn retry (still spawning after attempt #${this.spawnAttempts})`);
-          this.trySpawn();
-        }
+        if (this.state === 'spawning') this.trySpawn();
       }, 2000);
     }
   }
@@ -338,29 +333,138 @@ class AgarBot {
     this.moveInterval = setInterval(() => this.performAction(), 50);
   }
 
+  getOwnPosition() {
+    let totalX = 0, totalY = 0, count = 0;
+    for (const id of this.ownIDs) {
+      const cell = this.cells.get(id);
+      if (cell) {
+        totalX += cell.x;
+        totalY += cell.y;
+        count++;
+      }
+    }
+    if (count === 0) return null;
+    return { x: totalX / count, y: totalY / count };
+  }
+
+  findNearestVirus() {
+    const myPos = this.getOwnPosition();
+    if (!myPos) return null;
+    let nearest = null;
+    let minDist = Infinity;
+    for (const [id, cell] of this.cells) {
+      if (this.ownIDs.includes(id)) continue;
+      if (cell.flags & 1) {
+        const dx = cell.x - myPos.x;
+        const dy = cell.y - myPos.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < minDist) {
+          minDist = dist;
+          nearest = cell;
+        }
+      }
+    }
+    return nearest;
+  }
+
+  findNearestEnemy() {
+    const myPos = this.getOwnPosition();
+    if (!myPos) return null;
+    let nearest = null;
+    let minDist = Infinity;
+    for (const [id, cell] of this.cells) {
+      if (this.ownIDs.includes(id)) continue;
+      if (cell.flags & 1) continue;
+      if (cell.size < 20) continue;
+      const dx = cell.x - myPos.x;
+      const dy = cell.y - myPos.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < minDist) {
+        minDist = dist;
+        nearest = cell;
+      }
+    }
+    return nearest;
+  }
+
   performAction() {
     if (this.state !== 'alive' || this.paused) return;
     const wb = this.worldBorder;
+    this.feedTickCount++;
 
     switch (this.mode) {
-      case 'feed':
+      case 'follow':
         this.gameSend(proto.movePacket(this.targetX, this.targetY, this.movementKey));
-        this.gameSend(proto.ejectPacket());
+        if (this.boosterMode || this.feedTickCount % 2 === 0) {
+          this.gameSend(proto.ejectPacket());
+        }
         break;
-      case 'split':
-        this.gameSend(proto.movePacket(this.targetX, this.targetY, this.movementKey));
-        this.gameSend(proto.splitPacket());
-        break;
-      case 'random_feed': {
-        const rx = wb.minX + Math.random() * (wb.maxX - wb.minX);
-        const ry = wb.minY + Math.random() * (wb.maxY - wb.minY);
-        this.gameSend(proto.movePacket(rx, ry, this.movementKey));
-        this.gameSend(proto.ejectPacket());
+
+      case 'make_virus': {
+        const virus = this.findNearestVirus();
+        if (virus) {
+          this.gameSend(proto.movePacket(virus.x, virus.y, this.movementKey));
+          this.gameSend(proto.ejectPacket());
+        } else {
+          this.gameSend(proto.movePacket(this.targetX, this.targetY, this.movementKey));
+          this.gameSend(proto.ejectPacket());
+        }
         break;
       }
+
+      case 'break_virus': {
+        const virus = this.findNearestVirus();
+        if (virus) {
+          this.gameSend(proto.movePacket(virus.x, virus.y, this.movementKey));
+          if (this.feedTickCount % 10 === 0) {
+            this.gameSend(proto.splitPacket());
+          }
+        } else {
+          this.gameSend(proto.movePacket(this.targetX, this.targetY, this.movementKey));
+        }
+        break;
+      }
+
+      case 'feed_leave':
+        this.gameSend(proto.movePacket(this.targetX, this.targetY, this.movementKey));
+        this.gameSend(proto.ejectPacket());
+        if (this.tripleMass) {
+          this.gameSend(proto.ejectPacket());
+          this.gameSend(proto.ejectPacket());
+        }
+        break;
+
+      case 'smart_afk': {
+        const enemy = this.findNearestEnemy();
+        if (enemy) {
+          const myPos = this.getOwnPosition();
+          if (myPos) {
+            const dx = myPos.x - enemy.x;
+            const dy = myPos.y - enemy.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < 500) {
+              const fleeX = myPos.x + dx;
+              const fleeY = myPos.y + dy;
+              this.gameSend(proto.movePacket(fleeX, fleeY, this.movementKey));
+            } else {
+              this.gameSend(proto.movePacket(this.targetX, this.targetY, this.movementKey));
+              this.gameSend(proto.ejectPacket());
+            }
+          }
+        } else {
+          this.gameSend(proto.movePacket(this.targetX, this.targetY, this.movementKey));
+          this.gameSend(proto.ejectPacket());
+        }
+        break;
+      }
+
       default:
         this.gameSend(proto.movePacket(this.targetX, this.targetY, this.movementKey));
         this.gameSend(proto.ejectPacket());
+    }
+
+    if (this.feedtrackMode && this.feedTickCount % 3 === 0) {
+      this.gameSend(proto.ejectPacket());
     }
   }
 
@@ -389,7 +493,6 @@ class AgarBot {
 
   setPaused(paused) {
     this.paused = paused;
-    this.addLog(paused ? 'PAUSED' : 'RESUMED');
   }
 
   disconnect() {
@@ -401,7 +504,7 @@ class AgarBot {
     }
     if (this.state !== 'disconnected') {
       this.state = 'disconnected';
-      this.addLog(`disconnected: ${this.lastError} (pkts=${this.packetCount} sent=${this.sendCount} spawns=${this.spawnAttempts})`);
+      this.addLog(`disconnected: ${this.lastError}`);
     }
   }
 

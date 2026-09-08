@@ -35,7 +35,7 @@ class BotServerClient: ObservableObject {
         }
     }
 
-    func startBots(count: Int, names: [String], mode: String, targetX: Double, targetY: Double, partyCode: String? = nil, region: String = "EU-London", botKey: String? = nil) {
+    func startBots(count: Int, names: [String], mode: String, targetX: Double, targetY: Double, partyCode: String? = nil, region: String = "EU-London", botKey: String? = nil, gameMode: String = ":ffa", targetUID: String = "", tripleMass: Bool = false, boosterMode: Bool = false, feedtrackMode: Bool = false, botSkin: String = "") {
         guard sessionId == nil else { return }
 
         statusMessage = "Starting..."
@@ -46,9 +46,19 @@ class BotServerClient: ObservableObject {
             "mode": mode,
             "targetX": targetX,
             "targetY": targetY,
-            "region": region
+            "region": region,
+            "gameMode": gameMode,
+            "tripleMass": tripleMass,
+            "boosterMode": boosterMode,
+            "feedtrackMode": feedtrackMode
         ]
 
+        if !targetUID.isEmpty {
+            body["targetUID"] = targetUID
+        }
+        if !botSkin.isEmpty {
+            body["botSkin"] = botSkin
+        }
         if let code = partyCode, !code.isEmpty {
             body["partyCode"] = code
         }
@@ -134,7 +144,6 @@ class BotServerClient: ObservableObject {
                 case .success(let json):
                     let a = json["alive"] as? Int ?? 0
                     let t = json["total"] as? Int ?? 0
-                    let connected = json["connected"] as? Int ?? 0
                     self?.alive = a
                     self?.total = t
                     if !(self?.paused ?? false) {

@@ -41,9 +41,11 @@ class BotEngine: ObservableObject {
 
         let modeStr: String
         switch config.botAction {
-        case .feedTarget: modeStr = "feed"
-        case .suicide: modeStr = "split"
-        case .feedEverywhere: modeStr = "random_feed"
+        case .followPlayer: modeStr = "follow"
+        case .makeVirus: modeStr = "make_virus"
+        case .breakVirus: modeStr = "break_virus"
+        case .feedLeave: modeStr = "feed_leave"
+        case .smartAFK: modeStr = "smart_afk"
         }
 
         client.startBots(
@@ -54,7 +56,13 @@ class BotEngine: ObservableObject {
             targetY: targetY,
             partyCode: config.partyCode.isEmpty ? nil : config.partyCode,
             region: config.region,
-            botKey: config.botKey.isEmpty ? nil : config.botKey
+            botKey: config.botKey.isEmpty ? nil : config.botKey,
+            gameMode: config.gameMode.serverCode,
+            targetUID: config.targetUIDs.first ?? "",
+            tripleMass: config.tripleMass,
+            boosterMode: config.boosterMode,
+            feedtrackMode: config.feedtrackMode,
+            botSkin: config.botSkin
         )
     }
 

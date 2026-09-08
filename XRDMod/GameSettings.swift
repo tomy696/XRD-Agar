@@ -37,8 +37,9 @@ class GameSettings: ObservableObject {
         defaults.set(botConfig.botCount, forKey: k("botCount"))
         defaults.set(botConfig.botNames, forKey: k("botNames"))
         defaults.set(botConfig.partyCode, forKey: k("partyCode"))
-        defaults.set(botConfig.targetUID, forKey: k("targetUID"))
+        defaults.set(botConfig.targetUIDs, forKey: k("targetUIDs"))
         defaults.set(botConfig.botAction.rawValue, forKey: k("botAction"))
+        defaults.set(botConfig.gameMode.rawValue, forKey: k("gameMode"))
         defaults.set(botConfig.feedMacroRate, forKey: k("feedMacroRate"))
         defaults.set(botConfig.splitMacroRate, forKey: k("splitMacroRate"))
         defaults.set(botConfig.feedMacroSize, forKey: k("feedMacroSize"))
@@ -48,6 +49,10 @@ class GameSettings: ObservableObject {
         defaults.set(botConfig.softMacroAmount, forKey: k("softMacroAmount"))
         defaults.set(botConfig.region, forKey: k("region"))
         defaults.set(botConfig.botKey, forKey: k("botKey"))
+        defaults.set(botConfig.botSkin, forKey: k("botSkin"))
+        defaults.set(botConfig.tripleMass, forKey: k("tripleMass"))
+        defaults.set(botConfig.boosterMode, forKey: k("boosterMode"))
+        defaults.set(botConfig.feedtrackMode, forKey: k("feedtrackMode"))
         defaults.synchronize()
     }
 
@@ -60,14 +65,19 @@ class GameSettings: ObservableObject {
         if macroButtonSize < 30 { macroButtonSize = 50 }
         playerName = defaults.string(forKey: k("playerName")) ?? ""
         botConfig.botCount = defaults.integer(forKey: k("botCount"))
-        if botConfig.botCount == 0 { botConfig.botCount = 10 }
+        if botConfig.botCount == 0 { botConfig.botCount = 50 }
         if let names = defaults.stringArray(forKey: k("botNames")), !names.isEmpty {
             botConfig.botNames = names
         }
         botConfig.partyCode = defaults.string(forKey: k("partyCode")) ?? ""
-        botConfig.targetUID = defaults.string(forKey: k("targetUID")) ?? ""
+        if let uids = defaults.stringArray(forKey: k("targetUIDs")), !uids.isEmpty {
+            botConfig.targetUIDs = uids
+        }
         if let raw = defaults.string(forKey: k("botAction")), let v = BotAction(rawValue: raw) {
             botConfig.botAction = v
+        }
+        if let raw = defaults.string(forKey: k("gameMode")), let v = GameMode(rawValue: raw) {
+            botConfig.gameMode = v
         }
         let fr = defaults.double(forKey: k("feedMacroRate"))
         botConfig.feedMacroRate = fr > 0 ? fr : 50
@@ -82,6 +92,10 @@ class GameSettings: ObservableObject {
         botConfig.softMacroAmount = sma > 0 ? sma : 16
         botConfig.region = defaults.string(forKey: k("region")) ?? "EU-London"
         botConfig.botKey = defaults.string(forKey: k("botKey")) ?? ""
+        botConfig.botSkin = defaults.string(forKey: k("botSkin")) ?? ""
+        botConfig.tripleMass = defaults.bool(forKey: k("tripleMass"))
+        botConfig.boosterMode = defaults.bool(forKey: k("boosterMode"))
+        botConfig.feedtrackMode = defaults.bool(forKey: k("feedtrackMode"))
     }
 
     func resetAll() {

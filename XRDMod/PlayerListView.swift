@@ -31,7 +31,7 @@ struct PlayerListView: View {
                             .font(.system(size: 9, weight: .bold, design: .monospaced))
                             .foregroundColor(.gray)
                         Button(action: {
-                            settings.botConfig.targetUID = player.uid
+                            settings.botConfig.targetUIDs = [player.uid]
                             settings.targetPlayer = player
                             botEngine.updateTarget(x: Double(player.x), y: Double(player.y))
                         }) {
