@@ -118,8 +118,6 @@ class NetworkInterceptor: NSObject {
         guard let info = notif.userInfo,
               let url = info["url"] as? String else { return }
         bsdCapturedServer = url
-        capturedServerURL = url
-        savedServerURL = url
         if let ip = info["ip"] as? String {
             capturedServerIP = ip
         }

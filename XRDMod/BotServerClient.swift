@@ -21,7 +21,7 @@ class BotServerClient: ObservableObject {
         return url.isEmpty ? defaultURL : url
     }
 
-    func startBots(count: Int, names: [String], mode: String, targetX: Double, targetY: Double, gameServerURL: String?) {
+    func startBots(count: Int, names: [String], mode: String, targetX: Double, targetY: Double, gameServerURL: String?, serverIP: String? = nil) {
         guard sessionId == nil else { return }
 
         statusMessage = "Starting..."
@@ -36,6 +36,9 @@ class BotServerClient: ObservableObject {
 
         if let url = gameServerURL, !url.isEmpty {
             body["serverURL"] = url
+        }
+        if let ip = serverIP, !ip.isEmpty {
+            body["serverIP"] = ip
         }
 
         post("/api/start", body: body) { [weak self] result in

@@ -63,7 +63,7 @@ app.get('/health', (req, res) => {
 });
 
 app.post('/api/start', async (req, res) => {
-  const { count = 5, names, mode = 'feed', region = 'EU-London', gameMode = ':ffa', targetX = 0, targetY = 0, serverURL } = req.body;
+  const { count = 5, names, mode = 'feed', region = 'EU-London', gameMode = ':ffa', targetX = 0, targetY = 0, serverURL, serverIP } = req.body;
 
   const botCount = Math.min(count, 50);
   const botNames = names || Array.from({ length: botCount }, (_, i) => `XRD${i + 1}`);
@@ -71,10 +71,38 @@ app.post('/api/start', async (req, res) => {
   let serverInfo;
 
   if (serverURL) {
-    const stripped = serverURL.replace(/^wss?:\/\//, '');
-    const hostname = stripped.split('/')[0];
-    serverInfo = { url: serverURL.startsWith('ws') ? serverURL : `wss://${serverURL}`, hostname, token: '', fullPath: stripped };
-    console.log(`[start] using provided server: ${serverInfo.url} fullPath=${serverInfo.fullPath}`);
+    const stripped = serverURL.replace(/^wss?:\/\//, '').replace(/:443$/, '');
+    const hasPath = stripped.includes('/');
+
+    if (hasPath) {
+      const hostname = stripped.split('/')[0];
+      serverInfo = { url: `wss://${stripped}`, hostname, token: '', fullPath: stripped };
+      console.log(`[start] full path provided: ${serverInfo.url} fullPath=${serverInfo.fullPath}`);
+    } else {
+      console.log(`[start] URL has no path (${stripped}), need to resolve fullPath`);
+      try {
+        const bouncerInfo = await findServer(region, gameMode);
+        const bouncerPath = bouncerInfo.fullPath;
+        const pathParts = bouncerPath.split('/');
+        const bouncerHostname = pathParts[0];
+        const bouncerRegion = pathParts[1];
+
+        const userHostname = stripped.split(':')[0];
+        const ipForPath = serverIP ? serverIP.replace(/\./g, '-') : null;
+
+        if (ipForPath && bouncerRegion) {
+          const reconstructed = `${userHostname}/${bouncerRegion}/${ipForPath}`;
+          serverInfo = { url: `wss://${reconstructed}`, hostname: userHostname, token: '', fullPath: reconstructed };
+          console.log(`[start] reconstructed fullPath: ${reconstructed}`);
+        } else {
+          serverInfo = bouncerInfo;
+          console.log(`[start] using bouncer server: ${serverInfo.fullPath}`);
+        }
+      } catch (e) {
+        console.log(`[start] bouncer failed, using raw URL: ${stripped}`);
+        serverInfo = { url: `wss://${stripped}`, hostname: stripped.split(':')[0], token: '', fullPath: stripped };
+      }
+    }
   } else {
     try {
       serverInfo = await findServer(region, gameMode);
