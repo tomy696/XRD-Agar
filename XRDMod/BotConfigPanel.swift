@@ -88,8 +88,10 @@ struct BotConfigPanel: View {
                     .font(.system(size: 8, weight: .bold, design: .monospaced))
                     .foregroundColor(.gray)
                 let regions = [
-                    "EU-London", "US-Atlanta", "US-Dallas", "US-San Jose",
-                    "East Asia", "South America", "China", "Oceania", "Turkey", "Russia"
+                    "EU West 2", "EU West 3", "EU Central 1",
+                    "US East 1", "US East 2", "US West 1",
+                    "AP South 1", "AP Southeast 1", "AP Northeast 1",
+                    "ME South 1", "SA East 1"
                 ]
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 3) {
                     ForEach(regions, id: \.self) { r in

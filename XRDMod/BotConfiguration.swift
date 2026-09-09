@@ -53,7 +53,7 @@ struct BotConfiguration {
     var invisibleFeed: Bool = false
     var invisibleSplit: Bool = false
     var softMacroAmount: Int = 16
-    var region: String = "EU-London"
+    var region: String = "EU West 2"
     var botKey: String = ""
     var tripleMass: Bool = true
     var boosterMode: Bool = true
