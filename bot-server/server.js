@@ -159,7 +159,7 @@ app.get('/api/test', async (req, res) => {
 });
 
 app.post('/api/start', async (req, res) => {
-  const { count = 5, names, mode = 'feed', region = 'EU West 2', gameMode = ':ffa', targetX = 0, targetY = 0, proxy, proxies, partyCode, botKey, tripleMass = false, boosterMode = false, feedtrackMode = false, targetUID = '', botSkin = '' } = req.body;
+  const { count = 5, names, mode = 'feed', region = 'EU West 2', gameMode = ':ffa', targetX = 0, targetY = 0, proxy, proxies, partyCode, botKey, tripleMass = false, boosterMode = false, feedtrackMode = false, targetUID = '', botSkin = '', serverURL: directServerURL, serverToken: directServerToken } = req.body;
 
   let maxAllowed = 50;
   if (botKey) {
@@ -177,7 +177,13 @@ app.post('/api/start', async (req, res) => {
   let serverInfo;
   let generatedPartyCode = null;
 
-  if (partyCode) {
+  if (directServerURL) {
+    const wsURL = directServerURL.startsWith('wss://') ? directServerURL : `wss://${directServerURL}`;
+    const pathPart = wsURL.replace('wss://', '').replace('ws://', '');
+    const hostname = pathPart.split('/')[0];
+    serverInfo = { url: wsURL, hostname, token: directServerToken || '', fullPath: pathPart };
+    console.log(`[start] DIRECT server: ${serverInfo.fullPath} token=${serverInfo.token ? 'yes' : 'no'}`);
+  } else if (partyCode) {
     try {
       serverInfo = await findServer(region, ':party', partyCode);
       console.log(`[start] party join: ${serverInfo.fullPath} code=${partyCode}`);
