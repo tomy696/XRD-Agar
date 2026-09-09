@@ -6,6 +6,24 @@ const proto = require('./protocol');
 const app = express();
 app.use(express.json());
 
+const REGION_MAP = {
+  'EU West 2': 'EU-London',
+  'EU West 3': 'EU-London',
+  'EU Central 1': 'RU-Russia',
+  'US East 1': 'US-Atlanta',
+  'US East 2': 'US-Atlanta',
+  'US West 1': 'US-Atlanta',
+  'AP South 1': 'SG-Singapore',
+  'AP Southeast 1': 'SG-Singapore',
+  'AP Northeast 1': 'JP-Tokyo',
+  'ME South 1': 'TK-Turkey',
+  'SA East 1': 'BR-Brazil',
+};
+
+function resolveRegion(displayName) {
+  return REGION_MAP[displayName] || displayName;
+}
+
 const sessions = new Map();
 const botKeys = new Map();
 const proxyPool = [];
@@ -37,8 +55,9 @@ const PROTO_VERSION = '15.0.3';
 const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 
 function findServer(region, gameMode, partyToken) {
+  const bouncerRegion = resolveRegion(region);
   return new Promise((resolve, reject) => {
-    const body = proto.encodeBouncerRequest(region, gameMode, partyToken);
+    const body = proto.encodeBouncerRequest(bouncerRegion, gameMode, partyToken);
     const options = {
       hostname: WEB_BOUNCER,
       port: 443,
