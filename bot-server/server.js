@@ -224,7 +224,7 @@ app.post('/api/start', async (req, res) => {
   });
 
   for (let i = 0; i < bots.length; i++) {
-    setTimeout(() => bots[i].connect(), i * 2000);
+    setTimeout(() => bots[i].connect(), i * 300);
   }
 
   const response = {
