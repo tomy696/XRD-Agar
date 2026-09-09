@@ -57,20 +57,22 @@ function findServer(region, gameMode, partyToken) {
     };
 
     const req = https.request(options, (res) => {
-      let data = '';
-      res.on('data', (chunk) => data += chunk);
+      const chunks = [];
+      res.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
       res.on('end', () => {
-        console.log(`[findServer] HTTP ${res.statusCode}: ${data.substring(0, 200)}`);
+        const rawBuf = Buffer.concat(chunks);
+        const data = rawBuf.toString('utf8');
+        console.log(`[findServer] HTTP ${res.statusCode} len=${rawBuf.length} hex=${rawBuf.slice(0, 50).toString('hex')} text=${data.substring(0, 300)}`);
         try {
           const json = JSON.parse(data);
           const serverPath = json.endpoints?.https || json.endpoints?.http;
-          if (!serverPath) return reject(new Error('no endpoints'));
+          if (!serverPath || serverPath === '0.0.0.0:0') return reject(new Error(`no valid endpoints: ${data.substring(0, 200)}`));
           const wsURL = `wss://${serverPath}`;
           const hostname = serverPath.split('/')[0];
           const token = json.token || '';
           resolve({ url: wsURL, hostname, token, fullPath: serverPath });
         } catch (e) {
-          reject(new Error(`parse error: ${e.message}`));
+          reject(new Error(`parse error: ${e.message} raw=${data.substring(0, 200)}`));
         }
       });
     });
