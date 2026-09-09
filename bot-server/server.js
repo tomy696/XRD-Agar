@@ -101,6 +101,50 @@ function findServer(region, gameMode, partyToken) {
   });
 }
 
+// Resolve a party code to its arena via the bouncer's getToken endpoint.
+// This is how the real client joins a party: the code goes in the getToken
+// field (main field 3), and the bouncer always returns the one arena that
+// party lives on - unlike findServer, which load-balances and scatters.
+function getPartyServer(region, code) {
+  const bouncerRegion = resolveRegion(region);
+  const body = proto.encodeGetTokenRequest(bouncerRegion, code);
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: WEB_BOUNCER,
+      port: 443,
+      path: '/v4/getToken',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': body.length,
+        'x-support-proto-version': PROTO_VERSION,
+        'x-client-version': CLIENT_VERSION_INT,
+        'Origin': 'https://agar.io',
+        'Referer': 'https://agar.io/',
+        'User-Agent': BROWSER_UA
+      }
+    }, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(Buffer.from(c)));
+      res.on('end', () => {
+        const data = Buffer.concat(chunks).toString('utf8');
+        console.log(`[getToken] HTTP ${res.statusCode} ${data.substring(0, 200)}`);
+        try {
+          const json = JSON.parse(data);
+          const serverPath = json.endpoints?.https || json.endpoints?.http;
+          if (!serverPath || serverPath === '0.0.0.0:0') return reject(new Error(`party not found: ${data.substring(0, 150)}`));
+          resolve({ url: `wss://${serverPath}`, hostname: serverPath.split('/')[0], token: code, fullPath: serverPath });
+        } catch (e) {
+          reject(new Error(`getToken parse error: ${e.message}`));
+        }
+      });
+    });
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
+
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', sessions: sessions.size });
 });
@@ -182,8 +226,8 @@ app.post('/api/start', async (req, res) => {
   // A directly supplied arena only serves as a fallback when no code is given.
   if (partyCode) {
     try {
-      serverInfo = await findServer(region, ':party', partyCode);
-      console.log(`[start] party: ${serverInfo.fullPath} code=${partyCode}`);
+      serverInfo = await getPartyServer(region, partyCode);
+      console.log(`[start] party join via getToken: ${serverInfo.fullPath} code=${partyCode}`);
     } catch (e) {
       return res.status(500).json({ error: `party join failed: ${e.message}` });
     }

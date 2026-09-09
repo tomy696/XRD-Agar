@@ -266,9 +266,26 @@ function encodeBouncerRequest(region, gamemode, partyToken) {
   return outer;
 }
 
+// Party-join request for the /v4/getToken endpoint.
+// Main message: regionInfoField (field 1) = { region (1), gamemode (2)="" },
+// getTokenField (field 3) = { token (1)=partyCode }. Field tags are (num<<3)|2.
+function encodeGetTokenRequest(region, code) {
+  const rb = Buffer.from(region, 'utf8');
+  const regionMsg = Buffer.concat([
+    Buffer.from([0x0A, rb.length]), rb,
+    Buffer.from([0x12, 0x00])
+  ]);
+  const regionField = Buffer.concat([Buffer.from([0x0A, regionMsg.length]), regionMsg]);
+  const cb = Buffer.from(code, 'utf8');
+  const tokenMsg = Buffer.concat([Buffer.from([0x0A, cb.length]), cb]);
+  const getTokenField = Buffer.concat([Buffer.from([0x1A, tokenMsg.length]), tokenMsg]);
+  return Buffer.concat([regionField, getTokenField]);
+}
+
 module.exports = {
   murmur2, rotateKey, xorWithKey, versionToInt,
   handshakePacket, versionIntPacket, spawnPacket, movePacket,
   ejectPacket, splitPacket, pongPacket, tokenPacket, lz4Decompress,
+  encodeGetTokenRequest,
   parsePacket, encodeBouncerRequest
 };
