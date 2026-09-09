@@ -187,17 +187,10 @@ app.post('/api/start', async (req, res) => {
     }
   } else {
     try {
-      serverInfo = await findServer(region, ':party');
-      generatedPartyCode = serverInfo.token || null;
-      console.log(`[start] auto-party: ${serverInfo.fullPath} token=${generatedPartyCode}`);
+      serverInfo = await findServer(region, gameMode);
+      console.log(`[start] ${gameMode}: ${serverInfo.fullPath}`);
     } catch (e) {
-      console.log(`[start] auto-party failed, trying FFA: ${e.message}`);
-      try {
-        serverInfo = await findServer(region, gameMode);
-        console.log(`[start] FFA fallback: ${serverInfo.fullPath}`);
-      } catch (e2) {
-        return res.status(500).json({ error: `findServer failed: ${e2.message}` });
-      }
+      return res.status(500).json({ error: `findServer failed: ${e.message}` });
     }
   }
 
@@ -245,7 +238,7 @@ app.post('/api/start', async (req, res) => {
   });
 
   for (let i = 0; i < bots.length; i++) {
-    setTimeout(() => bots[i].connect(), i * 300);
+    setTimeout(() => bots[i].connect(), i * 1500);
   }
 
   const response = {
