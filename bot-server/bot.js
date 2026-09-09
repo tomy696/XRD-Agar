@@ -226,7 +226,6 @@ class AgarBot {
         this.encryptionKey = proto.murmur2(this.fullPath + pkt.ver, 255);
         this.handshakeComplete = true;
         this.addLog(`F1 mk=${pkt.movementKey} dk=${this.decryptionKey} ek=${this.encryptionKey} ver="${pkt.ver}"`);
-        this.trySpawn();
         break;
 
       case 'outdated':
