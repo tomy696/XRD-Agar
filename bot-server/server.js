@@ -177,27 +177,26 @@ app.post('/api/start', async (req, res) => {
   let serverInfo;
   let generatedPartyCode = null;
 
-  // Asking the bouncer to resolve a party code returns a different arena on
-  // nearly every call, so it can never place bots beside the player. Connecting
-  // straight to the arena the player is already in is the only reliable route;
-  // the party code then only has to group them once they are there.
-  if (directServerURL) {
+  // A party code resolves to the arena hosting that party, which is all a
+  // browser-based launcher gets to work with, so it stays the primary route.
+  // A directly supplied arena only serves as a fallback when no code is given.
+  if (partyCode) {
+    try {
+      serverInfo = await findServer(region, ':party', partyCode);
+      console.log(`[start] party: ${serverInfo.fullPath} code=${partyCode}`);
+    } catch (e) {
+      return res.status(500).json({ error: `party join failed: ${e.message}` });
+    }
+  } else if (directServerURL) {
     const wsURL = directServerURL.startsWith('wss://') ? directServerURL : `wss://${directServerURL}`;
     const fullPath = wsURL.replace(/^wss?:\/\//, '');
     serverInfo = {
       url: wsURL,
       hostname: fullPath.split('/')[0],
-      token: partyCode || '',
+      token: '',
       fullPath
     };
-    console.log(`[start] direct: ${fullPath} party=${partyCode || 'none'}`);
-  } else if (partyCode) {
-    try {
-      serverInfo = await findServer(region, ':party', partyCode);
-      console.log(`[start] party via bouncer: ${serverInfo.fullPath} code=${partyCode}`);
-    } catch (e) {
-      return res.status(500).json({ error: `party join failed: ${e.message}` });
-    }
+    console.log(`[start] direct arena: ${fullPath}`);
   } else {
     try {
       serverInfo = await findServer(region, gameMode);
