@@ -90,14 +90,12 @@ class AgarBot {
             wsOpts.agent = new SocksProxyAgent(this.proxy);
             this.addLog(`using SOCKS proxy: ${this.proxy.replace(/:[^:@]+@/, ':***@')}`);
           } else if (!isSocks && HttpsProxyAgent) {
-            const m = this.proxy.match(/^https?:\/\/([^:]+):([^@]+)@([^:]+):(\d+)/);
+            const m = this.proxy.match(/^(https?):\/\/([^:]+):([^@]+)@([^:]+):(\d+)/);
             if (m) {
-              wsOpts.agent = new HttpsProxyAgent({
-                host: m[3],
-                port: parseInt(m[4]),
-                auth: `${m[1]}:${m[2]}`,
-                protocol: 'http:'
-              });
+              const user = encodeURIComponent(m[2]);
+              const pass = encodeURIComponent(m[3]);
+              const cleanUrl = `${m[1]}://${user}:${pass}@${m[4]}:${m[5]}`;
+              wsOpts.agent = new HttpsProxyAgent(cleanUrl);
             } else {
               wsOpts.agent = new HttpsProxyAgent(this.proxy);
             }
