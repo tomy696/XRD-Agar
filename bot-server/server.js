@@ -85,7 +85,7 @@ app.get('/health', (req, res) => {
 });
 
 app.get('/api/test', async (req, res) => {
-  const region = req.query.region || 'EU-London';
+  const region = req.query.region || 'EU West 2';
   const gameMode = req.query.gameMode || ':ffa';
   const proxy = getNextProxy();
   const steps = [];
