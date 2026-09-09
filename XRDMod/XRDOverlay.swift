@@ -290,6 +290,7 @@ class XRDOverlay: NSObject {
         L.append("JS: connected=\(jsBridge.isConnected) status=\(jsBridge.statusInfo)")
         L.append("JS.scanned: \(jsBridge.scannedCount) urls: \(jsBridge.connectedURLs.joined(separator: " | "))")
         let ni = NetworkInterceptor.shared
+        L.append("Net.BOTS-TARGET: \(ni.liveGameServerURL ?? "NONE")")
         L.append("Net.server: \(ni.bestServerURL ?? "none")")
         L.append("Net.captured: \(ni.capturedServerURL ?? "none")")
         L.append("Net.bsd: \(ni.bsdCapturedServer ?? "none")")
