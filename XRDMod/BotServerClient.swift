@@ -36,7 +36,7 @@ class BotServerClient: ObservableObject {
         }
     }
 
-    func startBots(count: Int, names: [String], mode: String, targetX: Double, targetY: Double, partyCode: String? = nil, region: String = "EU-London", botKey: String? = nil, gameMode: String = ":ffa", targetUID: String = "", tripleMass: Bool = false, boosterMode: Bool = false, feedtrackMode: Bool = false, botSkin: String = "") {
+    func startBots(count: Int, names: [String], mode: String, targetX: Double, targetY: Double, partyCode: String? = nil, region: String = "EU-London", botKey: String? = nil, gameMode: String = ":ffa", targetUID: String = "", tripleMass: Bool = false, boosterMode: Bool = false, feedtrackMode: Bool = false, botSkin: String = "", serverURL: String? = nil) {
         guard sessionId == nil else { return }
 
         statusMessage = "Starting..."
@@ -54,6 +54,9 @@ class BotServerClient: ObservableObject {
             "feedtrackMode": feedtrackMode
         ]
 
+        if let url = serverURL, !url.isEmpty {
+            body["serverURL"] = url
+        }
         if !targetUID.isEmpty {
             body["targetUID"] = targetUID
         }

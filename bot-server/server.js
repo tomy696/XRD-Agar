@@ -159,7 +159,7 @@ app.get('/api/test', async (req, res) => {
 });
 
 app.post('/api/start', async (req, res) => {
-  const { count = 5, names, mode = 'feed', region = 'EU West 2', gameMode = ':ffa', targetX = 0, targetY = 0, proxy, proxies, partyCode, botKey, tripleMass = false, boosterMode = false, feedtrackMode = false, targetUID = '', botSkin = '' } = req.body;
+  const { count = 5, names, mode = 'feed', region = 'EU West 2', gameMode = ':ffa', targetX = 0, targetY = 0, proxy, proxies, partyCode, botKey, tripleMass = false, boosterMode = false, feedtrackMode = false, targetUID = '', botSkin = '', serverURL: directServerURL } = req.body;
 
   let maxAllowed = 50;
   if (botKey) {
@@ -176,24 +176,25 @@ app.post('/api/start', async (req, res) => {
 
   let serverInfo;
   let generatedPartyCode = null;
-  let perBotTokens = null;
 
-  if (partyCode) {
+  if (directServerURL && partyCode) {
+    // BiteYT method: direct server + party code as token
+    const wsURL = directServerURL.startsWith('wss://') ? directServerURL : `wss://${directServerURL}`;
+    const pathPart = wsURL.replace('wss://', '').replace('ws://', '');
+    const hostname = pathPart.split('/')[0];
+    serverInfo = { url: wsURL, hostname, token: partyCode, fullPath: pathPart };
+    console.log(`[start] DIRECT+PARTY: ${serverInfo.fullPath} code=${partyCode}`);
+  } else if (directServerURL) {
+    const wsURL = directServerURL.startsWith('wss://') ? directServerURL : `wss://${directServerURL}`;
+    const pathPart = wsURL.replace('wss://', '').replace('ws://', '');
+    const hostname = pathPart.split('/')[0];
+    serverInfo = { url: wsURL, hostname, token: '', fullPath: pathPart };
+    console.log(`[start] DIRECT server: ${serverInfo.fullPath}`);
+  } else if (partyCode) {
     try {
       serverInfo = await findServer(region, ':party', partyCode);
-      console.log(`[start] party join: ${serverInfo.fullPath} code=${partyCode} token=${serverInfo.token}`);
-      // Each bot needs its own bouncer token to join the party group
-      perBotTokens = [serverInfo.token];
-      const BATCH = 5;
-      for (let i = 1; i < botCount; i += BATCH) {
-        const batch = [];
-        for (let j = i; j < Math.min(i + BATCH, botCount); j++) {
-          batch.push(findServer(region, ':party', partyCode).then(info => info.token).catch(() => partyCode));
-        }
-        const tokens = await Promise.all(batch);
-        perBotTokens.push(...tokens);
-      }
-      console.log(`[start] got ${perBotTokens.length} unique tokens for party`);
+      serverInfo.token = partyCode;
+      console.log(`[start] party via bouncer: ${serverInfo.fullPath} code=${partyCode}`);
     } catch (e) {
       console.log(`[start] party join failed: ${e.message}`);
       return res.status(500).json({ error: `party join failed: ${e.message}` });
@@ -207,7 +208,7 @@ app.post('/api/start', async (req, res) => {
     }
   }
 
-  console.log(`[start] server=${serverInfo.url} host=${serverInfo.hostname} mode=${mode} triple=${tripleMass} booster=${boosterMode} feedtrack=${feedtrackMode}`);
+  console.log(`[start] server=${serverInfo.url} host=${serverInfo.hostname} token=${serverInfo.token} mode=${mode}`);
 
   sessionCounter++;
   const sessionId = `s${sessionCounter}_${Date.now().toString(36)}`;
@@ -223,12 +224,11 @@ app.post('/api/start', async (req, res) => {
     } else {
       botProxy = getNextProxy();
     }
-    const botToken = perBotTokens ? perBotTokens[i] : serverInfo.token;
     const bot = new AgarBot(
       botNames[i % botNames.length],
       serverInfo.url,
       serverInfo.hostname,
-      botToken,
+      serverInfo.token,
       mode,
       serverInfo.fullPath,
       botProxy,
