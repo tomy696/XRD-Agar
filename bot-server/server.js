@@ -15,8 +15,12 @@ let sessionCounter = 0;
 // Rotating proxy gateway: one URL, each connection = different IP
 // Set via Railway env var: PROXY_GATEWAY=socks5://user:pass@gateway:port
 // Set USE_PROXY=true to enable (disabled by default to avoid breaking WS)
-const PROXY_GATEWAY = process.env.PROXY_GATEWAY || '';
+let PROXY_GATEWAY = process.env.PROXY_GATEWAY || '';
+if (PROXY_GATEWAY.startsWith('PROXY_GATEWAY=')) {
+  PROXY_GATEWAY = PROXY_GATEWAY.replace('PROXY_GATEWAY=', '');
+}
 const USE_PROXY = process.env.USE_PROXY === 'true';
+console.log(`[config] USE_PROXY=${USE_PROXY} PROXY_GATEWAY=${PROXY_GATEWAY ? 'set (' + PROXY_GATEWAY.replace(/:[^:@]+@/, ':***@') + ')' : 'not set'}`);
 
 function getNextProxy() {
   if (!USE_PROXY) return null;
