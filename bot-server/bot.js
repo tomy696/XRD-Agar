@@ -88,12 +88,23 @@ class AgarBot {
           const isSocks = this.proxy.startsWith('socks');
           if (isSocks && SocksProxyAgent) {
             wsOpts.agent = new SocksProxyAgent(this.proxy);
+            this.addLog(`using SOCKS proxy: ${this.proxy.replace(/:[^:@]+@/, ':***@')}`);
           } else if (!isSocks && HttpsProxyAgent) {
-            wsOpts.agent = new HttpsProxyAgent(this.proxy);
+            const m = this.proxy.match(/^https?:\/\/([^:]+):([^@]+)@([^:]+):(\d+)/);
+            if (m) {
+              wsOpts.agent = new HttpsProxyAgent({
+                host: m[3],
+                port: parseInt(m[4]),
+                auth: `${m[1]}:${m[2]}`,
+                protocol: 'http:'
+              });
+            } else {
+              wsOpts.agent = new HttpsProxyAgent(this.proxy);
+            }
+            this.addLog(`using HTTP proxy: ${this.proxy.replace(/:[^:@]+@/, ':***@')}`);
           }
-          this.addLog(`using proxy (${isSocks ? 'socks' : 'http'}): ${this.proxy.replace(/:[^:@]+@/, ':***@')}`);
         } catch (e) {
-          this.addLog(`proxy agent failed, connecting direct: ${e.message}`);
+          this.addLog(`proxy agent error: ${e.message}`);
         }
       }
       this.ws = new WebSocket(this.serverURL, wsOpts);
