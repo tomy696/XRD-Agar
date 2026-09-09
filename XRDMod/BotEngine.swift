@@ -39,10 +39,6 @@ class BotEngine: ObservableObject {
     func startBots(config: BotConfiguration) {
         guard !isRunning else { return }
 
-        let interceptor = NetworkInterceptor.shared
-        let capturedURL = interceptor.bestServerURL
-        let capturedToken = interceptor.capturedToken
-
         client.startBots(
             count: config.botCount,
             names: config.resolvedNames,
@@ -57,9 +53,7 @@ class BotEngine: ObservableObject {
             tripleMass: config.tripleMass,
             boosterMode: config.boosterMode,
             feedtrackMode: config.feedtrackMode,
-            botSkin: config.botSkin,
-            serverURL: capturedURL,
-            serverToken: capturedToken
+            botSkin: config.botSkin
         )
     }
 

@@ -153,9 +153,6 @@ class AgarBot {
   sendHandshake() {
     this.rawSend(proto.handshakePacket(PROTOCOL_VERSION));
     this.rawSend(proto.versionIntPacket(VERSION_INT));
-    if (this.token) {
-      this.rawSend(proto.tokenPacket(this.token));
-    }
     this.addLog(`handshake sent proto=${PROTOCOL_VERSION} versionInt=${VERSION_INT}`);
   }
 
@@ -226,6 +223,10 @@ class AgarBot {
         this.encryptionKey = proto.murmur2(this.fullPath + pkt.ver, 255);
         this.handshakeComplete = true;
         this.addLog(`F1 mk=${pkt.movementKey} dk=${this.decryptionKey} ek=${this.encryptionKey} ver="${pkt.ver}"`);
+        if (this.token) {
+          this.gameSend(proto.tokenPacket(this.token));
+          this.addLog(`token sent (encrypted) len=${this.token.length}`);
+        }
         break;
 
       case 'outdated':
