@@ -46,6 +46,17 @@ class NetworkInterceptor: NSObject {
         capturedServerURL ?? bsdCapturedServer ?? manualServerURL ?? savedServerURL
     }
 
+    /// Arena captured during this app run. Never falls back to `savedServerURL`,
+    /// which persists across launches and would point at a server the player left.
+    var liveGameServerURL: String? {
+        if let ws = gameWebSocket, ws.state == .running, let live = gameWebSocketURL {
+            return live
+        }
+        return manualServerURL ?? bsdCapturedServer ?? capturedServerURL
+    }
+
+    private(set) var gameWebSocketURL: String?
+
     var hasGameWS: Bool {
         gameWebSocket != nil && gameWebSocket?.state == .running
     }
@@ -194,16 +205,17 @@ class NetworkInterceptor: NSObject {
     func handleWebSocketURL(_ url: URL, task: URLSessionWebSocketTask?) {
         let str = url.absoluteString
         logWS(str)
+        guard str.contains("arena") || str.contains("agar") ||
+              str.contains("miniclip") || str.contains("tech.") else { return }
+        guard !str.contains("bouncer") else { return }
         DispatchQueue.main.async {
-            if str.contains("agar") || str.contains("tech.") || str.contains("miniclip") ||
-               str.contains("arena") || str.hasPrefix("wss://") {
-                self.capturedServerURL = str
-                self.savedServerURL = str
-                if let task = task {
-                    self.gameWebSocket = task
-                }
-                NotificationCenter.default.post(name: .xrdServerCaptured, object: nil)
+            self.capturedServerURL = str
+            self.savedServerURL = str
+            self.gameWebSocketURL = str
+            if let task = task {
+                self.gameWebSocket = task
             }
+            NotificationCenter.default.post(name: .xrdServerCaptured, object: nil)
         }
     }
 }

@@ -39,8 +39,10 @@ class BotEngine: ObservableObject {
     func startBots(config: BotConfiguration) {
         guard !isRunning else { return }
 
-        let interceptor = NetworkInterceptor.shared
-        let serverURL = interceptor.bestServerURL
+        guard let serverURL = NetworkInterceptor.shared.liveGameServerURL else {
+            statusMessage = "Join a game first"
+            return
+        }
 
         client.startBots(
             count: config.botCount,
