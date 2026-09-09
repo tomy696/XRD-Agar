@@ -49,7 +49,7 @@ class AgarBot {
     this.virusTargetY = 0;
     this.captchaCount = 0;
     this.reconnectCount = 0;
-    this.maxReconnects = 5;
+    this.maxReconnects = 20;
     this.onReconnect = null;
   }
 
@@ -128,7 +128,7 @@ class AgarBot {
     this.ws.on('close', (code, reason) => {
       this.addLog(`WS closed code=${code} reason=${reason || ''}`);
       this.lastError = `closed code=${code}`;
-      this.disconnect();
+      this.reconnectWithNewIP();
     });
 
     this.ws.on('error', (err) => {
