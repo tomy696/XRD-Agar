@@ -176,11 +176,24 @@ app.post('/api/start', async (req, res) => {
 
   let serverInfo;
   let generatedPartyCode = null;
+  let perBotTokens = null;
 
   if (partyCode) {
     try {
       serverInfo = await findServer(region, ':party', partyCode);
-      console.log(`[start] party join: ${serverInfo.fullPath} code=${partyCode}`);
+      console.log(`[start] party join: ${serverInfo.fullPath} code=${partyCode} token=${serverInfo.token}`);
+      // Each bot needs its own bouncer token to join the party group
+      perBotTokens = [serverInfo.token];
+      const BATCH = 5;
+      for (let i = 1; i < botCount; i += BATCH) {
+        const batch = [];
+        for (let j = i; j < Math.min(i + BATCH, botCount); j++) {
+          batch.push(findServer(region, ':party', partyCode).then(info => info.token).catch(() => partyCode));
+        }
+        const tokens = await Promise.all(batch);
+        perBotTokens.push(...tokens);
+      }
+      console.log(`[start] got ${perBotTokens.length} unique tokens for party`);
     } catch (e) {
       console.log(`[start] party join failed: ${e.message}`);
       return res.status(500).json({ error: `party join failed: ${e.message}` });
@@ -210,11 +223,12 @@ app.post('/api/start', async (req, res) => {
     } else {
       botProxy = getNextProxy();
     }
+    const botToken = perBotTokens ? perBotTokens[i] : serverInfo.token;
     const bot = new AgarBot(
       botNames[i % botNames.length],
       serverInfo.url,
       serverInfo.hostname,
-      serverInfo.token,
+      botToken,
       mode,
       serverInfo.fullPath,
       botProxy,
