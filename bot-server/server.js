@@ -177,26 +177,25 @@ app.post('/api/start', async (req, res) => {
   let serverInfo;
   let generatedPartyCode = null;
 
-  if (directServerURL && partyCode) {
-    // BiteYT method: direct server + party code as token
+  // Asking the bouncer to resolve a party code returns a different arena on
+  // nearly every call, so it can never place bots beside the player. Connecting
+  // straight to the arena the player is already in is the only reliable route;
+  // the party code then only has to group them once they are there.
+  if (directServerURL) {
     const wsURL = directServerURL.startsWith('wss://') ? directServerURL : `wss://${directServerURL}`;
-    const pathPart = wsURL.replace('wss://', '').replace('ws://', '');
-    const hostname = pathPart.split('/')[0];
-    serverInfo = { url: wsURL, hostname, token: partyCode, fullPath: pathPart };
-    console.log(`[start] DIRECT+PARTY: ${serverInfo.fullPath} code=${partyCode}`);
-  } else if (directServerURL) {
-    const wsURL = directServerURL.startsWith('wss://') ? directServerURL : `wss://${directServerURL}`;
-    const pathPart = wsURL.replace('wss://', '').replace('ws://', '');
-    const hostname = pathPart.split('/')[0];
-    serverInfo = { url: wsURL, hostname, token: '', fullPath: pathPart };
-    console.log(`[start] DIRECT server: ${serverInfo.fullPath}`);
+    const fullPath = wsURL.replace(/^wss?:\/\//, '');
+    serverInfo = {
+      url: wsURL,
+      hostname: fullPath.split('/')[0],
+      token: partyCode || '',
+      fullPath
+    };
+    console.log(`[start] direct: ${fullPath} party=${partyCode || 'none'}`);
   } else if (partyCode) {
     try {
       serverInfo = await findServer(region, ':party', partyCode);
-      serverInfo.token = partyCode;
       console.log(`[start] party via bouncer: ${serverInfo.fullPath} code=${partyCode}`);
     } catch (e) {
-      console.log(`[start] party join failed: ${e.message}`);
       return res.status(500).json({ error: `party join failed: ${e.message}` });
     }
   } else {

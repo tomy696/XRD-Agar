@@ -40,7 +40,7 @@ class BotEngine: ObservableObject {
         guard !isRunning else { return }
 
         guard let serverURL = NetworkInterceptor.shared.liveGameServerURL else {
-            statusMessage = "Join a game first"
+            statusMessage = "Join a game first, then start bots"
             return
         }
 
