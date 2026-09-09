@@ -39,19 +39,10 @@ class BotEngine: ObservableObject {
     func startBots(config: BotConfiguration) {
         guard !isRunning else { return }
 
-        let modeStr: String
-        switch config.botAction {
-        case .followPlayer: modeStr = "follow"
-        case .makeVirus: modeStr = "make_virus"
-        case .breakVirus: modeStr = "break_virus"
-        case .feedLeave: modeStr = "feed_leave"
-        case .smartAFK: modeStr = "smart_afk"
-        }
-
         client.startBots(
             count: config.botCount,
             names: config.resolvedNames,
-            mode: modeStr,
+            mode: config.botAction.serverMode,
             targetX: targetX,
             targetY: targetY,
             partyCode: config.partyCode.isEmpty ? nil : config.partyCode,

@@ -399,14 +399,27 @@ class AgarBot {
     this.feedTickCount++;
 
     switch (this.mode) {
-      case 'follow':
+      case 'move':
+        this.gameSend(proto.movePacket(this.targetX, this.targetY, this.movementKey));
+        break;
+
+      case 'feed':
+        this.gameSend(proto.movePacket(this.targetX, this.targetY, this.movementKey));
+        this.gameSend(proto.ejectPacket());
+        if (this.tripleMass) {
+          this.gameSend(proto.ejectPacket());
+          this.gameSend(proto.ejectPacket());
+        }
+        break;
+
+      case 'farm':
         this.gameSend(proto.movePacket(this.targetX, this.targetY, this.movementKey));
         if (this.boosterMode || this.feedTickCount % 2 === 0) {
           this.gameSend(proto.ejectPacket());
         }
         break;
 
-      case 'make_virus': {
+      case 'makevirus': {
         const virus = this.findNearestVirus();
         if (virus) {
           this.gameSend(proto.movePacket(virus.x, virus.y, this.movementKey));
@@ -418,7 +431,7 @@ class AgarBot {
         break;
       }
 
-      case 'break_virus': {
+      case 'breakvirus': {
         const virus = this.findNearestVirus();
         if (virus) {
           this.gameSend(proto.movePacket(virus.x, virus.y, this.movementKey));
@@ -431,16 +444,7 @@ class AgarBot {
         break;
       }
 
-      case 'feed_leave':
-        this.gameSend(proto.movePacket(this.targetX, this.targetY, this.movementKey));
-        this.gameSend(proto.ejectPacket());
-        if (this.tripleMass) {
-          this.gameSend(proto.ejectPacket());
-          this.gameSend(proto.ejectPacket());
-        }
-        break;
-
-      case 'smart_afk': {
+      case 'teamer': {
         const enemy = this.findNearestEnemy();
         if (enemy) {
           const myPos = this.getOwnPosition();

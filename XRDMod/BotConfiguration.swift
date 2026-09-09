@@ -1,13 +1,25 @@
 import Foundation
 
 enum BotAction: String, CaseIterable, Identifiable {
-    case followPlayer = "Follow Player"
-    case makeVirus = "Make Virus"
-    case breakVirus = "Break Virus"
-    case feedLeave = "Feed-leave"
-    case smartAFK = "Smart AFK"
+    case move = "Move"
+    case feed = "Feed"
+    case farm = "Farm"
+    case makevirus = "Make Virus"
+    case breakvirus = "Break Virus"
+    case teamer = "Teamer"
 
     var id: String { rawValue }
+
+    var serverMode: String {
+        switch self {
+        case .move: return "move"
+        case .feed: return "feed"
+        case .farm: return "farm"
+        case .makevirus: return "makevirus"
+        case .breakvirus: return "breakvirus"
+        case .teamer: return "teamer"
+        }
+    }
 }
 
 enum GameMode: String, CaseIterable, Identifiable {
@@ -32,7 +44,7 @@ struct BotConfiguration {
     var botSkin: String = ""
     var partyCode: String = ""
     var targetUIDs: [String] = [""]
-    var botAction: BotAction = .followPlayer
+    var botAction: BotAction = .feed
     var gameMode: GameMode = .classic
     var feedMacroRate: Double = 50
     var splitMacroRate: Double = 40

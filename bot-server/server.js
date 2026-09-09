@@ -134,7 +134,7 @@ app.get('/api/test', async (req, res) => {
 });
 
 app.post('/api/start', async (req, res) => {
-  const { count = 5, names, mode = 'follow', region = 'EU-London', gameMode = ':ffa', targetX = 0, targetY = 0, proxy, proxies, partyCode, botKey, tripleMass = false, boosterMode = false, feedtrackMode = false, targetUID = '', botSkin = '' } = req.body;
+  const { count = 5, names, mode = 'feed', region = 'EU-London', gameMode = ':ffa', targetX = 0, targetY = 0, proxy, proxies, partyCode, botKey, tripleMass = false, boosterMode = false, feedtrackMode = false, targetUID = '', botSkin = '' } = req.body;
 
   let maxAllowed = 50;
   if (botKey) {
